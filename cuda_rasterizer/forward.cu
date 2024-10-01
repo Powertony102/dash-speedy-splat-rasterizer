@@ -221,20 +221,27 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		return;
 	float det_inv = 1.f / det;
 	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
+       // Compute extent in screen space (by finding eigenvalues of
+       // 2D covariance matrix). Use extent to compute a bounding rectangle
+       // of screen-space tiles that this Gaussian overlaps with. Quit if
+       // rectangle covers 0 tiles. 
+       float mid = 0.5f * (cov.x + cov.z);
+       float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
+       float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
+       float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
 
-	// Compute extent in screen space (by finding eigenvalues of
-	// 2D covariance matrix). Use extent to compute a bounding rectangle
-	// of screen-space tiles that this Gaussian overlaps with. Quit if
-	// rectangle covers 0 tiles. 
-	float mid = 0.5f * (cov.x + cov.z);
-	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
-	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
-	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+  // Updated: Compute extent in screen space by identifying exact
+  // screen-space tile.overlap with Gaussian.
+  // No longer need radius
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
-	uint2 rect_min, rect_max;
-	getRect(point_image, my_radius, rect_min, rect_max, grid);
-	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
-		return;
+	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] };
+  // Only counts tiles touched when nullptr is passed as array argment.
+  uint32_t tiles_count = duplicateToTilesTouched(
+      point_image, con_o, grid,
+      0, 0, 0,
+      nullptr, nullptr);
+  if (tiles_count == 0)
+    return;
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
@@ -248,11 +255,11 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Store some useful helper data for the next steps.
 	depths[idx] = p_view.z;
-	radii[idx] = my_radius;
+       radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
 	// Inverse 2D covariance and opacity neatly pack into one float4
-	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
-	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+	conic_opacity[idx] = con_o;
+  tiles_touched[idx] = tiles_count;
 }
 
 // Main rasterization method. Collaboratively works on one tile per

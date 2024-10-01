@@ -65,6 +65,7 @@ __global__ void checkFrustum(int P,
 	present[idx] = in_frustum(idx, orig_points, viewmatrix, projmatrix, false, p_view);
 }
 
+
 // Generates one key/value pair for all Gaussian / tile overlaps. 
 // Run once per Gaussian (1:N mapping).
 __global__ void duplicateWithKeys(
@@ -74,7 +75,8 @@ __global__ void duplicateWithKeys(
 	const uint32_t* offsets,
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
-	int* radii,
+	float4* con_o,
+  uint32_t* tiles_touched,
 	dim3 grid)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -82,31 +84,17 @@ __global__ void duplicateWithKeys(
 		return;
 
 	// Generate no key/value pair for invisible Gaussians
-	if (radii[idx] > 0)
+	if (tiles_touched[idx] > 0)
 	{
 		// Find this Gaussian's offset in buffer for writing keys/values.
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
-		uint2 rect_min, rect_max;
-
-		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
-
-		// For each tile that the bounding rect overlaps, emit a 
-		// key/value pair. The key is |  tile ID  |      depth      |,
-		// and the value is the ID of the Gaussian. Sorting the values 
-		// with this key yields Gaussian IDs in a list, such that they
-		// are first sorted by tile and then by depth. 
-		for (int y = rect_min.y; y < rect_max.y; y++)
-		{
-			for (int x = rect_min.x; x < rect_max.x; x++)
-			{
-				uint64_t key = y * grid.x + x;
-				key <<= 32;
-				key |= *((uint32_t*)&depths[idx]);
-				gaussian_keys_unsorted[off] = key;
-				gaussian_values_unsorted[off] = idx;
-				off++;
-			}
-		}
+    // Update unsorted arrays with Gaussian idx for every tile that
+    // Gaussian touches
+    duplicateToTilesTouched(
+        points_xy[idx], con_o[idx], grid,
+        idx, off, depths[idx],
+        gaussian_keys_unsorted,
+        gaussian_values_unsorted);
 	}
 }
 
@@ -293,7 +281,8 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.point_offsets,
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,
-		radii,
+		geomState.conic_opacity,
+    geomState.tiles_touched,
 		tile_grid)
 	CHECK_CUDA(, debug)
 
