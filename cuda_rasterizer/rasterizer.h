@@ -48,6 +48,7 @@ namespace CudaRasterizer
 			const float* cam_pos,
 			const float tan_fovx, float tan_fovy,
 			const bool prefiltered,
+      float* kernel_times,
 			float* out_color,
 			int* radii = nullptr,
 			bool debug = false);

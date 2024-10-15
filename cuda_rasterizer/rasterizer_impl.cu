@@ -203,10 +203,23 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
+  float* kernel_times,
 	float* out_color,
 	int* radii,
 	bool debug)
 {
+  // Timers for functions
+  cudaEvent_t start, stop, overallStart, overallStop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventCreate(&overallStart);
+  cudaEventCreate(&overallStop);
+  float milliseconds;
+
+	int num_rendered;
+  // Record Overall forward time
+  cudaEventRecord(overallStart, 0);
+
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
@@ -232,6 +245,8 @@ int CudaRasterizer::Rasterizer::forward(
 		throw std::runtime_error("For non-RGB, provide precomputed Gaussian colors!");
 	}
 
+  // Record Preprocess
+  cudaEventRecord(start, 0);
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
 	CHECK_CUDA(FORWARD::preprocess(
 		P, D, M,
@@ -259,19 +274,32 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.tiles_touched,
 		prefiltered
 	), debug)
+  // End Preprocess timer
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  kernel_times[0] = milliseconds;
 
+  // Record Inclusive Sum
+  cudaEventRecord(start, 0);
 	// Compute prefix sum over full list of touched tile counts by Gaussians
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
 	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P), debug)
+  // End Inclusive Sum timer
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  kernel_times[1] = milliseconds;
 
 	// Retrieve total number of Gaussian instances to launch and resize aux buffers
-	int num_rendered;
 	CHECK_CUDA(cudaMemcpy(&num_rendered, geomState.point_offsets + P - 1, sizeof(int), cudaMemcpyDeviceToHost), debug);
 
 	size_t binning_chunk_size = required<BinningState>(num_rendered);
 	char* binning_chunkptr = binningBuffer(binning_chunk_size);
 	BinningState binningState = BinningState::fromChunk(binning_chunkptr, num_rendered);
 
+  // Record duplicateWithKeys
+  cudaEventRecord(start, 0);
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
 	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
@@ -285,9 +313,16 @@ int CudaRasterizer::Rasterizer::forward(
     geomState.tiles_touched,
 		tile_grid)
 	CHECK_CUDA(, debug)
+  // End duplicateWithKeys timer
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  kernel_times[2] = milliseconds;
 
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
 
+  // Record Radix Sort
+  cudaEventRecord(start, 0);
 	// Sort complete list of (duplicated) Gaussian indices by keys
 	CHECK_CUDA(cub::DeviceRadixSort::SortPairs(
 		binningState.list_sorting_space,
@@ -295,19 +330,35 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_keys_unsorted, binningState.point_list_keys,
 		binningState.point_list_unsorted, binningState.point_list,
 		num_rendered, 0, 32 + bit), debug)
+  //End Radix Sort timer
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  kernel_times[3] = milliseconds;
 
 	CHECK_CUDA(cudaMemset(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2)), debug);
 
+  // Record identifyTileRanges
+  cudaEventRecord(start, 0);
 	// Identify start and end of per-tile workloads in sorted list
 	if (num_rendered > 0)
 		identifyTileRanges << <(num_rendered + 255) / 256, 256 >> > (
 			num_rendered,
 			binningState.point_list_keys,
 			imgState.ranges);
+  // End identifyTileRanges timer
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  kernel_times[4] = milliseconds;
+
 	CHECK_CUDA(, debug)
 
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
+
+  // Record render
+  cudaEventRecord(start, 0);
 	CHECK_CUDA(FORWARD::render(
 		tile_grid, block,
 		imgState.ranges,
@@ -320,6 +371,24 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color), debug)
+
+  // End render timer
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  kernel_times[5] = milliseconds;
+
+
+  // End Overall timer
+  cudaEventRecord(overallStop, 0);
+  cudaEventSynchronize(overallStop);
+  cudaEventElapsedTime(&milliseconds, overallStart, overallStop);
+  kernel_times[6] = milliseconds;
+
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+  cudaEventDestroy(overallStart);
+  cudaEventDestroy(overallStop);
 
 	return num_rendered;
 }
