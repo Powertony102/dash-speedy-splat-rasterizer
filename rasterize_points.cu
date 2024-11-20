@@ -66,7 +66,7 @@ RasterizeGaussiansCUDA(
   auto float_opts = means3D.options().dtype(torch::kFloat32);
 
   // Timer code is generated on CPU, so just keep kernel_times on CPU
-  torch::Tensor kernel_times = torch::full({7}, 0.0, float_opts.device(torch::kCPU));
+  torch::Tensor kernel_times = torch::full({1}, 0.0, float_opts.device(torch::kCPU));
   torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
   torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
 
