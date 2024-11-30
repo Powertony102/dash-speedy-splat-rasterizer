@@ -1,19 +1,19 @@
 # Differential Gaussian Rasterization
 
-Used as the rasterization engine for the paper "3D Gaussian Splatting for Real-Time Rendering of Radiance Fields". If you can make use of it in your own research, please be so kind to cite us.
+Updated 3D-GS Rasterizer for Speedy-Splat. Please cite our work as well as 3D-GS if you find this code useful to your research!
 
 <section class="section" id="BibTeX">
   <div class="container is-max-desktop content">
     <h2 class="title">BibTeX</h2>
-    <pre><code>@Article{kerbl3Dgaussians,
-      author       = {Kerbl, Bernhard and Kopanas, Georgios and Leimk{\"u}hler, Thomas and Drettakis, George},
-      title        = {3D Gaussian Splatting for Real-Time Radiance Field Rendering},
-      journal      = {ACM Transactions on Graphics},
-      number       = {4},
-      volume       = {42},
-      month        = {July},
-      year         = {2023},
-      url          = {https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/}
+    <pre><code>@Article{HansonSpeedy,
+      author       = {Hanson, Alex and Tu, Allen and Lin, Geng, and Singla, Vasu and Zwicker, Matthias and Goldstein, Tom},
+      title        = {Speedy-Splat: Fast 3D Gaussian Splatting with Sparse Pixels and Sparse Primitives},
+      journal      = {arxiv},
+      year         = {2024}
 }</code></pre>
   </div>
 </section>
+
+## Funding and Acknowledgments
+
+This work was made possible by the IARPA WRIVA Program, the ONR MURI program, and DAPRA TIAMAT. Commercial support was provided by Capital One Bank, the Amazon Research Award program, and Open Philanthropy. Further support was provided by the National Science Foundation (IIS-2212182), and by the NSF TRAILS Institute (2229885). Zwicker was additionally supported by the National Science Foundation (IIS-2126407).
