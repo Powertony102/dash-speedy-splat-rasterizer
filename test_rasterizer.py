@@ -40,53 +40,54 @@ def main():
     # 分数 (N, 1)
     scores = torch.randn(N, 1, dtype=torch.float32, device=device)
     
-    # 创建光栅化设置
-    image_height = 256
-    image_width = 256
-    tanfovx = 0.5
-    tanfovy = 0.5
-    bg = torch.tensor([0.1, 0.1, 0.1], dtype=torch.float32, device=device)
-    scale_modifier = 1.0
-    
-    # 简单的视图矩阵 (4x4)
-    viewmatrix = torch.eye(4, dtype=torch.float32, device=device)
-    viewmatrix[2, 3] = -2.0  # 相机向后移动
-    
-    # 简单的投影矩阵 (4x4)
-    projmatrix = torch.eye(4, dtype=torch.float32, device=device)
-    projmatrix[0, 0] = 1.0 / tanfovx
-    projmatrix[1, 1] = 1.0 / tanfovy
-    projmatrix[2, 2] = -(1000.0 + 0.1) / (1000.0 - 0.1)
-    projmatrix[2, 3] = -2.0 * 1000.0 * 0.1 / (1000.0 - 0.1)
-    projmatrix[3, 2] = -1.0
-    projmatrix[3, 3] = 0.0
-    
-    sh_degree = 3
-    campos = torch.tensor([0.0, 0.0, 2.0], dtype=torch.float32, device=device)
-    prefiltered = False
-    debug = True  # 开启调试模式
-    
-    raster_settings = GaussianRasterizationSettings(
-        image_height=image_height,
-        image_width=image_width,
-        tanfovx=tanfovx,
-        tanfovy=tanfovy,
-        bg=bg,
-        scale_modifier=scale_modifier,
-        viewmatrix=viewmatrix,
-        projmatrix=projmatrix,
-        sh_degree=sh_degree,
-        campos=campos,
-        prefiltered=prefiltered,
-        debug=debug
-    )
-    
     # 测试不同的tile_size
     tile_sizes = [16, 32, 64]
     
     for tile_size in tile_sizes:
         print(f"\n测试 tile_size = {tile_size}")
         try:
+            # 创建光栅化设置
+            image_height = 256
+            image_width = 256
+            tanfovx = 0.5
+            tanfovy = 0.5
+            bg = torch.tensor([0.1, 0.1, 0.1], dtype=torch.float32, device=device)
+            scale_modifier = 1.0
+            
+            # 简单的视图矩阵 (4x4)
+            viewmatrix = torch.eye(4, dtype=torch.float32, device=device)
+            viewmatrix[2, 3] = -2.0
+            
+            # 简单的投影矩阵 (4x4)
+            projmatrix = torch.eye(4, dtype=torch.float32, device=device)
+            projmatrix[0, 0] = 1.0 / tanfovx
+            projmatrix[1, 1] = 1.0 / tanfovy
+            projmatrix[2, 2] = -(1000.0 + 0.1) / (1000.0 - 0.1)
+            projmatrix[2, 3] = -2.0 * 1000.0 * 0.1 / (1000.0 - 0.1)
+            projmatrix[3, 2] = -1.0
+            projmatrix[3, 3] = 0.0
+            
+            sh_degree = 3
+            campos = torch.tensor([0.0, 0.0, 2.0], dtype=torch.float32, device=device)
+            prefiltered = False
+            debug = True  # 开启调试模式
+            
+            raster_settings = GaussianRasterizationSettings(
+                image_height=image_height,
+                image_width=image_width,
+                tanfovx=tanfovx,
+                tanfovy=tanfovy,
+                bg=bg,
+                scale_modifier=scale_modifier,
+                viewmatrix=viewmatrix,
+                projmatrix=projmatrix,
+                sh_degree=sh_degree,
+                campos=campos,
+                prefiltered=prefiltered,
+                debug=debug,
+                tile_size=tile_size  # 将tile_size作为raster_settings的一部分
+            )
+            
             # 调用光栅化函数
             color, radii, kernel_times = rasterize_gaussians(
                 means3D=means3D,
@@ -98,8 +99,7 @@ def main():
                 rotations=rotations,
                 cov3Ds_precomp=cov3Ds_precomp,
                 scores=scores,
-                raster_settings=raster_settings,
-                tile_size=tile_size
+                raster_settings=raster_settings
             )
             
             print(f"成功! 输出形状: {color.shape}")

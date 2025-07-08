@@ -53,7 +53,7 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& campos,
 	const bool prefiltered,
 	const bool debug,
-	const int tile_size)  // 接收tile_size参数
+	const int tile_size)  // 保留tile_size参数，但会从raster_settings传递过来
 {
   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
     AT_ERROR("means3D must have dimensions (num_points, 3)");
@@ -142,7 +142,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
 	const bool debug,
-	const int tile_size)  // 接收tile_size参数
+	const int tile_size)  // 保留tile_size参数，但会从raster_settings传递过来
 {
   const int P = means3D.size(0);
   const int H = dL_dout_color.size(1);
@@ -200,8 +200,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  debug,
 	  tile_size);  // 传递tile_size参数
   }
-
-  return std::make_tuple(dL_dmeans2D, dL_dcolors, dL_dopacity, dL_dmeans3D, dL_dcov3D, dL_dsh, dL_dscales, dL_drotations, dL_dG2);
+  return std::make_tuple(dL_dmeans2D, dL_dconic, dL_dopacity, dL_dcolors, dL_dmeans3D, dL_dcov3D, dL_dsh, dL_dscales, dL_drotations, dL_dG2);
 }
 
 torch::Tensor markVisible(

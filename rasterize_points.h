@@ -36,7 +36,7 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& campos,
 	const bool prefiltered,
 	const bool debug,
-	const int tile_size = 16);
+	const int tile_size = 16);  // 从raster_settings传递过来的tile_size
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
  RasterizeGaussiansBackwardCUDA(
@@ -61,7 +61,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
 	const bool debug,
-	const int tile_size = 16);
+	const int tile_size = 16);  // 从raster_settings传递过来的tile_size
 		
 torch::Tensor markVisible(
 		torch::Tensor& means3D,

@@ -29,7 +29,6 @@ def rasterize_gaussians(
     cov3Ds_precomp,
     scores,
     raster_settings,
-    tile_size: int = 16,  # 新增tile_size参数，默认值16以保持向后兼容
 ):
     return _RasterizeGaussians.apply(
         means3D,
@@ -42,7 +41,6 @@ def rasterize_gaussians(
         cov3Ds_precomp,
         scores,
         raster_settings,
-        tile_size,  # 传递tile_size参数
     )
 
 class _RasterizeGaussians(torch.autograd.Function):
@@ -59,7 +57,6 @@ class _RasterizeGaussians(torch.autograd.Function):
         cov3Ds_precomp,
         scores,
         raster_settings,
-        tile_size,  # 接收tile_size参数
     ):
 
         # Restructure arguments the way that the C++ lib expects them
@@ -83,7 +80,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.campos,
             raster_settings.prefiltered,
             raster_settings.debug,
-            tile_size,  # 将tile_size添加到参数列表中
+            raster_settings.tile_size,  # 从raster_settings获取tile_size
         )
 
         # Invoke C++/CUDA rasterizer
@@ -101,7 +98,6 @@ class _RasterizeGaussians(torch.autograd.Function):
         # Keep relevant tensors for backward
         ctx.raster_settings = raster_settings
         ctx.num_rendered = num_rendered
-        ctx.tile_size = tile_size  # 保存tile_size用于backward
         ctx.save_for_backward(colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer)
         return color, radii, kernel_times
 
@@ -111,7 +107,6 @@ class _RasterizeGaussians(torch.autograd.Function):
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
-        tile_size = ctx.tile_size  # 恢复tile_size
         colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer = ctx.saved_tensors
 
         # Restructure args as C++ method expects them
@@ -136,7 +131,7 @@ class _RasterizeGaussians(torch.autograd.Function):
                 binningBuffer,
                 imgBuffer,
                 raster_settings.debug,
-                tile_size)  # 将tile_size添加到backward参数列表中
+                raster_settings.tile_size)  # 从raster_settings获取tile_size
 
         # Compute gradients for relevant tensors by invoking backward method
         if raster_settings.debug:
@@ -161,7 +156,6 @@ class _RasterizeGaussians(torch.autograd.Function):
             grad_cov3Ds_precomp,
             grad_gaussians2,
             None,  # raster_settings
-            None,  # tile_size
         )
 
         return grads
@@ -179,6 +173,7 @@ class GaussianRasterizationSettings(NamedTuple):
     campos : torch.Tensor
     prefiltered : bool
     debug : bool
+    tile_size : int = 16  # 添加tile_size字段，默认值16
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
@@ -196,7 +191,7 @@ class GaussianRasterizer(nn.Module):
             
         return visible
 
-    def forward(self, means3D, means2D, opacities, scores, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None, tile_size: int = 16):
+    def forward(self, means3D, means2D, opacities, scores, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None):
         
         raster_settings = self.raster_settings
 
@@ -230,6 +225,5 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp,
             scores,
             raster_settings,
-            tile_size,  # 传递tile_size参数
         )
 
