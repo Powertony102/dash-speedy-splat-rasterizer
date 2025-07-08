@@ -200,7 +200,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  debug,
 	  tile_size);  // 传递tile_size参数
   }
-  return std::make_tuple(dL_dmeans2D, dL_dconic, dL_dopacity, dL_dcolors, dL_dmeans3D, dL_dcov3D, dL_dsh, dL_dscales, dL_drotations, dL_dG2);
+  return std::make_tuple(dL_dmeans2D, dL_dcolors, dL_dopacity, dL_dmeans3D, dL_dcov3D, dL_dsh, dL_dscales, dL_drotations, dL_dG2);
 }
 
 torch::Tensor markVisible(
