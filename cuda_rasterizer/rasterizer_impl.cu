@@ -77,7 +77,8 @@ __global__ void duplicateWithKeys(
 	uint32_t* gaussian_values_unsorted,
 	float4* con_o,
   uint32_t* tiles_touched,
-	dim3 grid)
+	dim3 grid,
+	const int tile_size)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -94,7 +95,8 @@ __global__ void duplicateWithKeys(
         points_xy[idx], con_o[idx], grid,
         idx, off, depths[idx],
         gaussian_keys_unsorted,
-        gaussian_values_unsorted);
+        gaussian_values_unsorted,
+        tile_size);
 	}
 }
 
@@ -206,7 +208,8 @@ int CudaRasterizer::Rasterizer::forward(
   float* kernel_times,
 	float* out_color,
 	int* radii,
-	bool debug)
+	bool debug,
+	const int tile_size)
 {
   // Timers for functions
   cudaEvent_t overallStart, overallStop;
@@ -230,8 +233,9 @@ int CudaRasterizer::Rasterizer::forward(
 		radii = geomState.internal_radii;
 	}
 
-	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
-	dim3 block(BLOCK_X, BLOCK_Y, 1);
+	// 使用动态tile_size而不是固定的BLOCK_X和BLOCK_Y
+	dim3 tile_grid((width + tile_size - 1) / tile_size, (height + tile_size - 1) / tile_size, 1);
+	dim3 block(tile_size, tile_size, 1);
 
 	// Dynamically resize image-based auxiliary buffers during training
 	size_t img_chunk_size = required<ImageState>(width * height);
@@ -268,7 +272,8 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.conic_opacity,
 		tile_grid,
 		geomState.tiles_touched,
-		prefiltered
+		prefiltered,
+		tile_size
 	), debug)
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians
@@ -293,7 +298,8 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_unsorted,
 		geomState.conic_opacity,
     geomState.tiles_touched,
-		tile_grid)
+		tile_grid,
+		tile_size)
 	CHECK_CUDA(, debug)
 
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
@@ -330,7 +336,8 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		background,
-		out_color), debug)
+		out_color,
+		tile_size), debug)
 
   // End Overall timer
   cudaEventRecord(overallStop, 0);
@@ -376,7 +383,8 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dscale,
 	float* dL_drot,
 	float* dL_dG2,
-	bool debug)
+	bool debug,
+	const int tile_size)
 {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
@@ -390,8 +398,9 @@ void CudaRasterizer::Rasterizer::backward(
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
-	const dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
-	const dim3 block(BLOCK_X, BLOCK_Y, 1);
+	// 使用动态tile_size而不是固定的BLOCK_X和BLOCK_Y
+	const dim3 tile_grid((width + tile_size - 1) / tile_size, (height + tile_size - 1) / tile_size, 1);
+	const dim3 block(tile_size, tile_size, 1);
 
 	// Compute loss gradients w.r.t. 2D mean position, conic matrix,
 	// opacity and RGB of Gaussians from per-pixel loss gradients.

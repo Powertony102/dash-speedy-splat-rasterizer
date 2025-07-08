@@ -176,15 +176,16 @@ __device__ inline uint32_t processTiles(
     const dim3 grid, const bool isY,
     uint32_t idx, uint32_t off, float depth,
     uint64_t* gaussian_keys_unsorted,
-    uint32_t* gaussian_values_unsorted
+    uint32_t* gaussian_values_unsorted,
+    const int tile_size = 16
     )
 {
 
     // ---- AccuTile Code ---- //
 
     // Set variables based on the isY flag
-    float BLOCK_U = isY ? BLOCK_Y : BLOCK_X;
-    float BLOCK_V = isY ? BLOCK_X : BLOCK_Y;
+    float BLOCK_U = tile_size;
+    float BLOCK_V = tile_size;
 
     if (isY) {
       rect_min = {rect_min.y, rect_min.x};
@@ -289,7 +290,8 @@ __device__ inline uint32_t duplicateToTilesTouched(
     const float2 p, const float4 con_o, const dim3 grid,
     uint32_t idx, uint32_t off, float depth,
     uint64_t* gaussian_keys_unsorted,
-    uint32_t* gaussian_values_unsorted
+    uint32_t* gaussian_values_unsorted,
+    const int tile_size = 16
     )
 {
 
@@ -325,12 +327,12 @@ __device__ inline uint32_t duplicateToTilesTouched(
 
     // Rectangular tile extent of ellipse
     int2 rect_min = {
-        max(0, min((int)grid.x, (int)(bbox_min.x / BLOCK_X))),
-        max(0, min((int)grid.y, (int)(bbox_min.y / BLOCK_Y)))
+        max(0, min((int)grid.x, (int)(bbox_min.x / tile_size))),
+        max(0, min((int)grid.y, (int)(bbox_min.y / tile_size)))
     };
     int2 rect_max = {
-        max(0, min((int)grid.x, (int)(bbox_max.x / BLOCK_X + 1))),
-        max(0, min((int)grid.y, (int)(bbox_max.y / BLOCK_Y + 1)))
+        max(0, min((int)grid.x, (int)(bbox_max.x / tile_size + 1))),
+        max(0, min((int)grid.y, (int)(bbox_max.y / tile_size + 1)))
     };
 
     int y_span = rect_max.y - rect_min.y;
@@ -351,7 +353,8 @@ __device__ inline uint32_t duplicateToTilesTouched(
         grid, isY,
         idx, off, depth,
         gaussian_keys_unsorted,
-        gaussian_values_unsorted
+        gaussian_values_unsorted,
+        tile_size
     );
 }
 

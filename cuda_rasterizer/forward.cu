@@ -177,7 +177,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
+	bool prefiltered,
+	const int tile_size)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -239,7 +240,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
   uint32_t tiles_count = duplicateToTilesTouched(
       point_image, con_o, grid,
       0, 0, 0,
-      nullptr, nullptr);
+      nullptr, nullptr,
+      tile_size);
   if (tiles_count == 0)
     return;
 
@@ -266,8 +268,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
 template <uint32_t CHANNELS>
-__global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
-renderCUDA(
+__global__ void renderCUDA(
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
@@ -277,13 +278,14 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
-	float* __restrict__ out_color)
+	float* __restrict__ out_color,
+	const int tile_size)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
-	uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
-	uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
-	uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	uint32_t horizontal_blocks = (W + tile_size - 1) / tile_size;
+	uint2 pix_min = { block.group_index().x * tile_size, block.group_index().y * tile_size };
+	uint2 pix_max = { min(pix_min.x + tile_size, W), min(pix_min.y + tile_size , H) };
 	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	uint32_t pix_id = W * pix.y + pix.x;
 	float2 pixf = { (float)pix.x, (float)pix.y };
@@ -295,13 +297,16 @@ renderCUDA(
 
 	// Load start/end range of IDs to process in bit sorted list.
 	uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
-	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
+	const int block_size = tile_size * tile_size;  // 动态计算block大小
+	const int rounds = ((range.y - range.x + block_size - 1) / block_size);
 	int toDo = range.y - range.x;
 
 	// Allocate storage for batches of collectively fetched data.
-	__shared__ int collected_id[BLOCK_SIZE];
-	__shared__ float2 collected_xy[BLOCK_SIZE];
-	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	// 注意：这里需要使用动态共享内存或者预分配最大的可能尺寸
+	extern __shared__ char shared_mem[];
+	int* collected_id = (int*)shared_mem;
+	float2* collected_xy = (float2*)(collected_id + block_size);
+	float4* collected_conic_opacity = (float4*)(collected_xy + block_size);
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -310,15 +315,15 @@ renderCUDA(
 	float C[CHANNELS] = { 0 };
 
 	// Iterate over batches until all done or range is complete
-	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
+	for (int i = 0; i < rounds; i++, toDo -= block_size)
 	{
 		// End if entire block votes that it is done rasterizing
 		int num_done = __syncthreads_count(done);
-		if (num_done == BLOCK_SIZE)
+		if (num_done == block_size)
 			break;
 
 		// Collectively fetch per-Gaussian data from global to shared
-		int progress = i * BLOCK_SIZE + block.thread_rank();
+		int progress = i * block_size + block.thread_rank();
 		if (range.x + progress < range.y)
 		{
 			int coll_id = point_list[range.x + progress];
@@ -329,7 +334,7 @@ renderCUDA(
 		block.sync();
 
 		// Iterate over current batch
-		for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++)
+		for (int j = 0; !done && j < min(block_size, toDo); j++)
 		{
 			// Keep track of current position in range
 			contributor++;
@@ -391,9 +396,14 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
-	float* out_color)
+	float* out_color,
+	const int tile_size)
 {
-	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
+	// 计算动态共享内存大小
+	const int block_size = tile_size * tile_size;
+	const size_t shared_mem_size = block_size * (sizeof(int) + sizeof(float2) + sizeof(float4));
+	
+	renderCUDA<NUM_CHANNELS> << <grid, block, shared_mem_size >> > (
 		ranges,
 		point_list,
 		W, H,
@@ -403,7 +413,8 @@ void FORWARD::render(
 		final_T,
 		n_contrib,
 		bg_color,
-		out_color);
+		out_color,
+		tile_size);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
@@ -430,7 +441,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
+	bool prefiltered,
+	const int tile_size)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
@@ -457,6 +469,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		conic_opacity,
 		grid,
 		tiles_touched,
-		prefiltered
+		prefiltered,
+		tile_size
 		);
 }
