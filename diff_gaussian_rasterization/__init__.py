@@ -173,6 +173,7 @@ class GaussianRasterizationSettings(NamedTuple):
     campos : torch.Tensor
     prefiltered : bool
     debug : bool
+    antialiasing : bool = False  # 新增抗锯齿开关，默认关闭
     tile_size : int = 16  # 添加tile_size字段，默认值16
 
 class GaussianRasterizer(nn.Module):
