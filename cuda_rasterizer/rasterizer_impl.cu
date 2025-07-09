@@ -434,7 +434,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_drot,
 	bool antialiasing,
 	bool debug,
-	int tile_size = 16)
+	int tile_size)
 {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
