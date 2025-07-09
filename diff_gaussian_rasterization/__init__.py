@@ -71,8 +71,13 @@ class _RasterizeGaussians(torch.autograd.Function):
             dc = torch.Tensor([])
             sh_rest = torch.Tensor([])
 
+        # Ensure background is on the same device as means3D to avoid cross-device issues
+        bg_tensor = raster_settings.bg
+        if bg_tensor.device != means3D.device:
+            bg_tensor = bg_tensor.to(means3D.device)
+
         args = (
-            raster_settings.bg,
+            bg_tensor,
             means3D,
             colors_precomp,
             opacities,
@@ -159,8 +164,12 @@ class _RasterizeGaussians(torch.autograd.Function):
             grad_out_invdepth = torch.Tensor([])
 
         # Restructure args as C++ method expects them
+        bg_tensor = raster_settings.bg
+        if bg_tensor.device != means3D.device:
+            bg_tensor = bg_tensor.to(means3D.device)
+
         args = (
-            raster_settings.bg,
+            bg_tensor,
             means3D,
             radii,
             colors_precomp,
