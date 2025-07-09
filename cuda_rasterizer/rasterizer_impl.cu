@@ -170,8 +170,7 @@ __global__ void perTileBucketCount(int T, uint2* ranges, uint32_t* bucketCount)
 
     // 需要的桶数：每 32 个 splat 加 1，但在处理第 0 个 splat 前
     // 就要保存一次采样状态，因此加上 “起始桶”。
-    int num_buckets = (num_splats == 0) ? 0
-                     : (num_splats - 1) / 32 + 1;   // 修正处
+    int num_buckets = (num_splats == 0) ? 0 : (num_splats - 1) / 32 + 1; // 修正：每 32 个 splat 归为一个 bucket，且第 0 个 splat 前也要存一次
     bucketCount[idx] = (uint32_t)num_buckets;
 }
 
