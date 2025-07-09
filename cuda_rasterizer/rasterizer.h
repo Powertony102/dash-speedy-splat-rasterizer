@@ -38,6 +38,7 @@ namespace CudaRasterizer
 			const float* means3D,
 			const float* shs,
 			const float* colors_precomp,
+			const float* dc,
 			const float* opacities,
 			const float* scales,
 			const float scale_modifier,
@@ -48,11 +49,12 @@ namespace CudaRasterizer
 			const float* cam_pos,
 			const float tan_fovx, float tan_fovy,
 			const bool prefiltered,
-      float* kernel_times,
+			bool antialiasing,
+      		float* kernel_times,
 			float* out_color,
 			int* radii = nullptr,
 			bool debug = false,
-			const int tile_size = 16);
+			int tile_size = 16);
 
 		static void backward(
 			const int P, int D, int M, int R,
@@ -61,6 +63,7 @@ namespace CudaRasterizer
 			const float* means3D,
 			const float* shs,
 			const float* colors_precomp,
+			const float* opacities,
 			const float* scales,
 			const float scale_modifier,
 			const float* rotations,
@@ -80,12 +83,15 @@ namespace CudaRasterizer
 			float* dL_dcolor,
 			float* dL_dmean3D,
 			float* dL_dcov3D,
+			float* dL_ddc,
 			float* dL_dsh,
 			float* dL_dscale,
 			float* dL_drot,
+			float* dL_dinvdepths,
 			float* dL_dG2,
 			bool debug,
-			const int tile_size = 16);
+			int tile_size = 16,
+			bool antialiasing);
 	};
 };
 

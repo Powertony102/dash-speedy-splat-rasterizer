@@ -27,6 +27,7 @@ namespace FORWARD
 		const float scale_modifier,
 		const glm::vec4* rotations,
 		const float* opacities,
+		const float* dc,
 		const float* shs,
 		bool* clamped,
 		const float* cov3D_precomp,
@@ -46,6 +47,7 @@ namespace FORWARD
 		const dim3 grid,
 		uint32_t* tiles_touched,
 		bool prefiltered,
+		bool antialiasing,
 		const int tile_size = 16);
 
 	// Main rasterization method.

@@ -81,6 +81,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.prefiltered,
             raster_settings.debug,
             raster_settings.tile_size,  # 从raster_settings获取tile_size
+            raster_settings.antialiasing # 从raster_settings获取antialiasing
         )
 
         # Invoke C++/CUDA rasterizer

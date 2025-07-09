@@ -195,6 +195,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* means3D,
 	const float* shs,
 	const float* colors_precomp,
+	const float* dc,
 	const float* opacities,
 	const float* scales,
 	const float scale_modifier,
@@ -205,7 +206,8 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
-  float* kernel_times,
+	bool antialiasing,
+  	float* kernel_times,
 	float* out_color,
 	int* radii,
 	bool debug,
@@ -255,6 +257,7 @@ int CudaRasterizer::Rasterizer::forward(
 		scale_modifier,
 		(glm::vec4*)rotations,
 		opacities,
+		dc,
 		shs,
 		geomState.clamped,
 		cov3D_precomp,
@@ -273,6 +276,7 @@ int CudaRasterizer::Rasterizer::forward(
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered,
+		antialiasing,
 		tile_size
 	), debug)
 
@@ -360,6 +364,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* means3D,
 	const float* shs,
 	const float* colors_precomp,
+	const float* opacities,
 	const float* scales,
 	const float scale_modifier,
 	const float* rotations,
@@ -371,7 +376,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const int* radii,
 	char* geom_buffer,
 	char* binning_buffer,
-	char* img_buffer,
+	char* image_buffer,
 	const float* dL_dpix,
 	float* dL_dmean2D,
 	float* dL_dconic,
@@ -379,16 +384,19 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dcolor,
 	float* dL_dmean3D,
 	float* dL_dcov3D,
+	float* dL_ddc,
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
+	float* dL_dinvdepths,
 	float* dL_dG2,
 	bool debug,
-	const int tile_size)
+	const int tile_size,
+	bool antialiasing)
 {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
-	ImageState imgState = ImageState::fromChunk(img_buffer, width * height);
+	ImageState imgState = ImageState::fromChunk(image_buffer, width * height);
 
 	if (radii == nullptr)
 	{
@@ -432,8 +440,10 @@ void CudaRasterizer::Rasterizer::backward(
 	CHECK_CUDA(BACKWARD::preprocess(P, D, M,
 		(float3*)means3D,
 		radii,
+		color_ptr,
 		shs,
 		geomState.clamped,
+		opacities,
 		(glm::vec3*)scales,
 		(glm::vec4*)rotations,
 		scale_modifier,
@@ -445,10 +455,14 @@ void CudaRasterizer::Rasterizer::backward(
 		(glm::vec3*)campos,
 		(float3*)dL_dmean2D,
 		dL_dconic,
+		dL_dinvdepths,
+		dL_dopacity,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
 		dL_dcov3D,
+		dL_ddc,
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
-		(glm::vec4*)dL_drot), debug)
+		(glm::vec4*)dL_drot,
+		antialiasing), debug)
 }

@@ -178,7 +178,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
-	const int tile_size)
+	int tile_size,
+	bool antialiasing)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -216,34 +217,51 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Compute 2D screen-space covariance matrix
 	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
 
+	// Apply low-pass filter: every Gaussian should be at least
+	// one pixel wide/high. Discard 3rd row and column.
+	constexpr float h_var = 0.3f;
+	const float det_cov = cov.x * cov.z - cov.y * cov.y;
+	cov.x += h_var;
+	cov.z += h_var;
+	const float det_cov_plus_h_cov = cov.x * cov.z - cov.y * cov.y;
+	float h_convolution_scaling = 1.0f;
+
+	if(antialiasing)
+		h_convolution_scaling = sqrt(max(0.000025f, det_cov / det_cov_plus_h_cov)); // max for numerical stability
+
 	// Invert covariance (EWA algorithm)
-	float det = (cov.x * cov.z - cov.y * cov.y);
+	// float det = (cov.x * cov.z - cov.y * cov.y);
+	float det = det_cov_plus_h_cov;
+
 	if (det == 0.0f)
 		return;
+
 	float det_inv = 1.f / det;
 	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
-       // Compute extent in screen space (by finding eigenvalues of
-       // 2D covariance matrix). Use extent to compute a bounding rectangle
-       // of screen-space tiles that this Gaussian overlaps with. Quit if
-       // rectangle covers 0 tiles. 
-       float mid = 0.5f * (cov.x + cov.z);
-       float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
-       float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
-       float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
 
-  // Updated: Compute extent in screen space by identifying exact
-  // screen-space tile.overlap with Gaussian.
-  // No longer need radius
+	// Compute extent in screen space (by finding eigenvalues of
+	// 2D covariance matrix). Use extent to compute a bounding rectangle
+	// of screen-space tiles that this Gaussian overlaps with. Quit if
+	// rectangle covers 0 tiles. 
+	float mid = 0.5f * (cov.x + cov.z);
+	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
+	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
+	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+
+	// Updated: Compute extent in screen space by identifying exact
+	// screen-space tile.overlap with Gaussian.
+	// No longer need radius
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
-	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] };
-  // Only counts tiles touched when nullptr is passed as array argment.
-  uint32_t tiles_count = duplicateToTilesTouched(
-      point_image, con_o, grid,
-      0, 0, 0,
-      nullptr, nullptr,
-      tile_size);
-  if (tiles_count == 0)
-    return;
+	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] * h_convolution_scaling };
+
+  	// Only counts tiles touched when nullptr is passed as array argment.
+	uint32_t tiles_count = duplicateToTilesTouched(
+		point_image, con_o, grid,
+		0, 0, 0,
+		nullptr, nullptr,
+		tile_size);
+	if (tiles_count == 0)
+		return;
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
