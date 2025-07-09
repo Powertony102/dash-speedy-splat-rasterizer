@@ -49,11 +49,12 @@ namespace CudaRasterizer
 			const float tan_fovx, float tan_fovy,
 			const bool prefiltered,
 			bool antialiasing,
-      float* kernel_times,
+			float* kernel_times,
 			float* out_color,
 			int* radii = nullptr,
 			bool debug = false,
-			const int tile_size = 16);
+			const int tile_size = 16
+		);
 
 		static void backward(
 			const int P, int D, int M, int R,
@@ -87,7 +88,8 @@ namespace CudaRasterizer
 			float* dL_drot,
 			float* dL_dG2,
 			bool debug,
-			const int tile_size = 16);
+			const int tile_size = 16
+		);
 	};
 };
 
