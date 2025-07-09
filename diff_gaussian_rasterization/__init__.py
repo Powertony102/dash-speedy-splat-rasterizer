@@ -63,9 +63,9 @@ class _RasterizeGaussians(torch.autograd.Function):
         # Split the SH coefficients into the direct color (dc, the first coefficient)
         # and the remaining SH coefficients expected by the CUDA implementation.
         if sh.numel() != 0:
-            # dc : [P, 3]
+            # dc : [P, 3] 取常数项，但仍保留完整 SH 数组以保持系数数量不变
             dc = sh[:, 0, :].contiguous()
-            sh_rest = sh[:, 1:, :].contiguous()
+            sh_rest = sh.contiguous()  # 不截断，避免 C++ 侧索引越界
         else:
             # Empty tensors keep interface identical when SHs are not provided
             dc = torch.Tensor([])
@@ -202,9 +202,14 @@ class _RasterizeGaussians(torch.autograd.Function):
         else:
              grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_dc, grad_sh, grad_scales, grad_rotations = _C.rasterize_gaussians_backward(*args)
 
-        # Combine gradients of dc (first SH coefficient) and the remaining SH coefficients
-        if grad_sh.numel() != 0 or grad_dc.numel() != 0:
-            grad_sh_full = torch.cat([grad_dc, grad_sh], dim=1)
+        # 将 grad_dc 写回 grad_sh 的第 0 阶系数位置，保持形状不变
+        if grad_sh.numel() != 0:
+            grad_sh_full = grad_sh.clone()
+            if grad_dc.numel() != 0:
+                grad_sh_full[:, 0:1, :] = grad_dc  # inplace 替换常数项梯度
+        elif grad_dc.numel() != 0:
+            # 无 SH 但有 dc 的异常情况，直接返回 dc 梯度形状兼容
+            grad_sh_full = grad_dc
         else:
             grad_sh_full = torch.Tensor([])
 
