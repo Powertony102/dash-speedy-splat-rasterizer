@@ -185,7 +185,7 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
-int CudaRasterizer::Rasterizer::forward(
+std::tuple<int, int> CudaRasterizer::Rasterizer::forward(
 	std::function<char* (size_t)> geometryBuffer,
 	std::function<char* (size_t)> binningBuffer,
 	std::function<char* (size_t)> imageBuffer,
@@ -350,7 +350,7 @@ int CudaRasterizer::Rasterizer::forward(
   cudaEventDestroy(overallStart);
   cudaEventDestroy(overallStop);
 
-	return num_rendered;
+	return std::make_tuple(num_rendered, chunk_size);
 }
 
 // Produce necessary gradients for optimization, corresponding

@@ -82,6 +82,7 @@ RasterizeGaussiansCUDA(
   std::function<char*(size_t)> imgFunc = resizeFunctional(imgBuffer);
   
   int rendered = 0;
+  int chunk_size = 0;
   if(P != 0)
   {
 	  int M = 0;
@@ -90,7 +91,7 @@ RasterizeGaussiansCUDA(
 		M = sh.size(1);
       }
 
-	  rendered = CudaRasterizer::Rasterizer::forward(
+	  std::tie(rendered, chunk_size) = CudaRasterizer::Rasterizer::forward(
 	    geomFunc,
 		binningFunc,
 		imgFunc,
@@ -118,7 +119,7 @@ RasterizeGaussiansCUDA(
 		debug,
 		tile_size);  // 传递tile_size参数
   }
-  return std::make_tuple(rendered, out_color, radii, kernel_times, geomBuffer, binningBuffer, imgBuffer);
+  return std::make_tuple(rendered, chunk_size, out_color, radii, kernel_times, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
