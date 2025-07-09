@@ -51,8 +51,8 @@ namespace CudaRasterizer
 			bool antialiasing,
 			float* kernel_times,
 			float* out_color,
-			int* radii = nullptr,
 			bool debug = false,
+			int* radii = nullptr,
 			const int tile_size = 16
 		);
 
