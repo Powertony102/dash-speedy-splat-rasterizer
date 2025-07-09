@@ -402,6 +402,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* background,
 	const int width, int height,
 	const float* means3D,
+	const float* dc,
 	const float* shs,
 	const float* colors_precomp,
 	const float* opacities,
@@ -424,16 +425,16 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dconic,
 	float* dL_dopacity,
 	float* dL_dcolor,
+	float* dL_dinvdepths,
 	float* dL_dmean3D,
 	float* dL_dcov3D,
 	float* dL_ddc,
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
-	float* dL_dinvdepths,
+	bool antialiasing,
 	bool debug,
-	const int tile_size,
-	bool antialiasing)
+	int tile_size = 16)
 {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
@@ -489,7 +490,7 @@ void CudaRasterizer::Rasterizer::backward(
 	CHECK_CUDA(BACKWARD::preprocess(P, D, M,
 		(float3*)means3D,
 		radii,
-		color_ptr,
+		dc,
 		shs,
 		geomState.clamped,
 		opacities,
