@@ -114,8 +114,8 @@ RasterizeGaussiansCUDA(
 		antialiasing,
     kernel_times.contiguous().data<float>(),
 		out_color.contiguous().data<float>(),
-		debug,
 		radii.contiguous().data<int>(),
+		debug,
 		tile_size);  // 传递tile_size参数
   }
   return std::make_tuple(rendered, out_color, radii, kernel_times, geomBuffer, binningBuffer, imgBuffer);

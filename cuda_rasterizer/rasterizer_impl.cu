@@ -208,8 +208,8 @@ int CudaRasterizer::Rasterizer::forward(
 	bool antialiasing,
 	float* kernel_times,
 	float* out_color,
-	bool debug,
 	int* radii,
+	bool debug,
 	const int tile_size)
 {
   // Timers for functions
