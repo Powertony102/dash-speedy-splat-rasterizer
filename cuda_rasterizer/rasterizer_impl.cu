@@ -205,10 +205,11 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
-  float* kernel_times,
+	bool antialiasing,
+	float* kernel_times,
 	float* out_color,
-	int* radii,
 	bool debug,
+	int* radii,
 	const int tile_size)
 {
   // Timers for functions
@@ -273,6 +274,7 @@ int CudaRasterizer::Rasterizer::forward(
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered,
+		antialiasing,
 		tile_size
 	), debug)
 
@@ -368,6 +370,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* projmatrix,
 	const float* campos,
 	const float tan_fovx, float tan_fovy,
+	bool antialiasing,
 	const int* radii,
 	char* geom_buffer,
 	char* binning_buffer,
@@ -450,5 +453,6 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dcov3D,
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
-		(glm::vec4*)dL_drot), debug)
+		(glm::vec4*)dL_drot,
+		antialiasing), debug)
 }

@@ -46,6 +46,7 @@ namespace FORWARD
 		const dim3 grid,
 		uint32_t* tiles_touched,
 		bool prefiltered,
+		bool antialiasing,
 		const int tile_size = 16);
 
 	// Main rasterization method.

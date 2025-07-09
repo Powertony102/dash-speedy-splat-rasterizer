@@ -35,6 +35,7 @@ RasterizeGaussiansCUDA(
 	const int degree,
 	const torch::Tensor& campos,
 	const bool prefiltered,
+	const bool antialiasing,
 	const bool debug,
 	const int tile_size = 16);  // 从raster_settings传递过来的tile_size
 
@@ -60,6 +61,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const int R,
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
+	const bool antialiasing,
 	const bool debug,
 	const int tile_size = 16);  // 从raster_settings传递过来的tile_size
 		

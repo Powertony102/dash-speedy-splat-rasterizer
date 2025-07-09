@@ -79,6 +79,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.sh_degree,
             raster_settings.campos,
             raster_settings.prefiltered,
+            raster_settings.antialiasing,
             raster_settings.debug,
             raster_settings.tile_size,  # 从raster_settings获取tile_size
         )
@@ -130,6 +131,7 @@ class _RasterizeGaussians(torch.autograd.Function):
                 num_rendered,
                 binningBuffer,
                 imgBuffer,
+                raster_settings.antialiasing,
                 raster_settings.debug,
                 raster_settings.tile_size)  # 从raster_settings获取tile_size
 

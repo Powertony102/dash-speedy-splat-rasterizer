@@ -178,6 +178,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
+	bool antialiasing,
 	const int tile_size)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -216,8 +217,18 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Compute 2D screen-space covariance matrix
 	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
 
-	// Invert covariance (EWA algorithm)
-	float det = (cov.x * cov.z - cov.y * cov.y);
+	// Anti-aliasing adjustment (EWA low-pass filtering)
+	constexpr float h_var = 0.3f;
+	// cov already includes h_var in computeCov2D; need original determinant before filtering
+	float det_cov = (cov.x - h_var) * (cov.z - h_var) - cov.y * cov.y;
+	// det after adding filter
+	float det_cov_plus_h_cov = cov.x * cov.z - cov.y * cov.y;
+	float h_convolution_scaling = 1.0f;
+	if (antialiasing)
+		h_convolution_scaling = sqrtf(max(0.000025f, det_cov / det_cov_plus_h_cov));
+
+	// Invert covariance (EWA algorithm) using filtered covariance
+	float det = det_cov_plus_h_cov;
 	if (det == 0.0f)
 		return;
 	float det_inv = 1.f / det;
@@ -235,7 +246,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
   // screen-space tile.overlap with Gaussian.
   // No longer need radius
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
-	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] };
+	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] * h_convolution_scaling };
   // Only counts tiles touched when nullptr is passed as array argment.
   uint32_t tiles_count = duplicateToTilesTouched(
       point_image, con_o, grid,
@@ -442,6 +453,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
+	bool antialiasing,
 	const int tile_size)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
@@ -470,6 +482,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		grid,
 		tiles_touched,
 		prefiltered,
+		antialiasing,
 		tile_size
 		);
 }
