@@ -474,7 +474,8 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
 	const size_t block_size = tile_size * tile_size;
 	char* dummy_ptr = nullptr;
 	CudaRasterizer::SampleState::fromChunk(dummy_ptr, bucket_sum, block_size);
-	size_t sample_chunk_size = (size_t)dummy_ptr + 128;
+	auto align128 = [](size_t v){ return (v + 127) & ~127UL; };
+	size_t sample_chunk_size = align128((size_t)dummy_ptr) + 128;
 	char* sample_chunkptr = sampleBuffer(sample_chunk_size);
 	SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum, block_size);
 

@@ -170,7 +170,7 @@ __global__ void perTileBucketCount(int T, uint2* ranges, uint32_t* bucketCount)
 
     // 需要的桶数：每 32 个 splat 加 1，但在处理第 0 个 splat 前
     // 就要保存一次采样状态，因此加上 “起始桶”。
-    int num_buckets = (num_splats == 0) ? 0 : (num_splats - 1) / 32 + 1; // 修正：每 32 个 splat 归为一个 bucket，且第 0 个 splat 前也要存一次
+    int num_buckets = (num_splats == 0) ? 0 : (num_splats + 31) / 32 + 1; // 统一 +1，防止边界漏桶
     bucketCount[idx] = (uint32_t)num_buckets;
 }
 
@@ -370,7 +370,8 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
     const size_t block_size = tile_size * tile_size;
     char* dummy_ptr = nullptr;
     CudaRasterizer::SampleState::fromChunk(dummy_ptr, bucket_sum, block_size);
-    size_t sample_chunk_size = (size_t)dummy_ptr + 128; // 预留额外 128 字节对齐余量
+    auto align128 = [](size_t v){ return (v + 127) & ~127UL; };
+    size_t sample_chunk_size = align128((size_t)dummy_ptr) + 128; // obtain 链后再对齐，彻底防止低估
     char* sample_chunkptr = sampleBuffer(sample_chunk_size);
     SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum, tile_size * tile_size);
 
