@@ -472,17 +472,9 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
 	CHECK_CUDA(cudaMemcpy(&bucket_sum, imgState.bucket_offsets + num_tiles - 1, sizeof(unsigned int), cudaMemcpyDeviceToHost), debug);
 	// create a state to store. size is number is the total number of buckets * block_size
 	const size_t block_size = tile_size * tile_size;
-	auto align128 = [](size_t v) { return (v + 127) & (~(size_t)127); };
-	size_t sample_chunk_size = 0;
-	sample_chunk_size = align128(sample_chunk_size);
-	sample_chunk_size += bucket_sum * block_size * sizeof(uint32_t);
-	sample_chunk_size = align128(sample_chunk_size);
-	sample_chunk_size += bucket_sum * block_size * sizeof(float);
-	sample_chunk_size = align128(sample_chunk_size);
-	sample_chunk_size += bucket_sum * block_size * sizeof(float) * NUM_CHANNELS_3DGS;
-	sample_chunk_size = align128(sample_chunk_size);
-	sample_chunk_size += bucket_sum * block_size * sizeof(float);
-	sample_chunk_size += 128;
+	char* dummy_ptr = nullptr;
+	CudaRasterizer::SampleState::fromChunk(dummy_ptr, bucket_sum, block_size);
+	size_t sample_chunk_size = (size_t)dummy_ptr + 128;
 	char* sample_chunkptr = sampleBuffer(sample_chunk_size);
 	SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum, block_size);
 

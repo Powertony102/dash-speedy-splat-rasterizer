@@ -366,29 +366,11 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
     CHECK_CUDA(cudaMemcpy(&bucket_sum, imgState.bucket_offsets + num_tiles - 1, sizeof(unsigned int), cudaMemcpyDeviceToHost), debug);
 
     // ------------- Sample buffers ----------------------
-    // 每 bucket 需要存储：
-    //   bucket_to_tile  : uint32_t  (4B)
-    //   T              : float     (4B)
-    //   ar             : float*NUM_CHANNELS_3DGS (4B*NUM_CHANNELS_3DGS)
-    //   ard            : float     (4B)
+    // 使用 SampleState::fromChunk 反推所需 buffer 大小，保证与 obtain 链一致
     const size_t block_size = tile_size * tile_size;
-
-    auto align128 = [](size_t v) { return (v + 127) & (~(size_t)127); };
-    size_t sample_chunk_size = 0;
-    // bucket_to_tile
-    sample_chunk_size = align128(sample_chunk_size);
-    sample_chunk_size += bucket_sum * block_size * sizeof(uint32_t);
-    // T
-    sample_chunk_size = align128(sample_chunk_size);
-    sample_chunk_size += bucket_sum * block_size * sizeof(float);
-    // ar (NUM_CHANNELS_3DGS floats)
-    sample_chunk_size = align128(sample_chunk_size);
-    sample_chunk_size += bucket_sum * block_size * sizeof(float) * NUM_CHANNELS_3DGS;
-    // ard
-    sample_chunk_size = align128(sample_chunk_size);
-    sample_chunk_size += bucket_sum * block_size * sizeof(float);
-    // 额外余量
-    sample_chunk_size += 128;
+    char* dummy_ptr = nullptr;
+    CudaRasterizer::SampleState::fromChunk(dummy_ptr, bucket_sum, block_size);
+    size_t sample_chunk_size = (size_t)dummy_ptr + 128; // 预留额外 128 字节对齐余量
     char* sample_chunkptr = sampleBuffer(sample_chunk_size);
     SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum, tile_size * tile_size);
 
