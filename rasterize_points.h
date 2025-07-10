@@ -72,9 +72,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const int tile_size = 16);
 		
 torch::Tensor markVisible(
-			torch::Tensor& means3D,
-			torch::Tensor& viewmatrix,
-			torch::Tensor& projmatrix);
+		torch::Tensor& means3D,
+		torch::Tensor& viewmatrix,
+		torch::Tensor& projmatrix);
 
 void adamUpdate(
 	torch::Tensor &param,

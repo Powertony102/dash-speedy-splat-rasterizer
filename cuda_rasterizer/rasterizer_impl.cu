@@ -170,7 +170,7 @@ __global__ void perTileBucketCount(int T, uint2* ranges, uint32_t* bucketCount)
 
     // 需要的桶数：每 32 个 splat 加 1，但在处理第 0 个 splat 前
     // 就要保存一次采样状态，因此加上 “起始桶”。
-    int num_buckets = (num_splats == 0) ? 0 : (num_splats + 31) / 32 + 1; // 统一 +1，防止边界漏桶
+    int num_buckets = (num_splats == 0) ? 0 : (num_splats - 1) / 32 + 1; // 恢复正确逻辑，(N-1)/32+1
     bucketCount[idx] = (uint32_t)num_buckets;
 }
 
@@ -396,7 +396,8 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
         background,
         out_color,
         geomState.depths,
-        invdepth), debug)
+        invdepth,
+        tile_size), debug)
 
     // 保存结果到 ImageState 方便 backward 使用
     CHECK_CUDA(cudaMemcpy(imgState.pixel_colors, out_color, sizeof(float) * width * height * NUM_CHANNELS_3DGS, cudaMemcpyDeviceToDevice), debug);

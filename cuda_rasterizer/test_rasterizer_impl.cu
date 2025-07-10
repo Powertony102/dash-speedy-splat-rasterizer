@@ -229,7 +229,7 @@ __global__ void perTileBucketCount(int T, uint2* ranges, uint32_t* bucketCount) 
 	
 	uint2 range = ranges[idx];
 	int num_splats = range.y - range.x;
-	int num_buckets = (num_splats + 31) / 32;
+	int num_buckets = (num_splats == 0) ? 0 : (num_splats - 1) / 32 + 1; // 恢复正确逻辑
 	bucketCount[idx] = (uint32_t) num_buckets;
 }
 
@@ -497,7 +497,8 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
 		background,
 		out_color,
 		geomState.depths,
-		invdepth), debug)
+		invdepth,
+		tile_size), debug)
 
 	CHECK_CUDA(cudaMemcpy(imgState.pixel_colors, out_color, sizeof(float) * width * height * NUM_CHANNELS_3DGS, cudaMemcpyDeviceToDevice), debug);
 	CHECK_CUDA(cudaMemcpy(imgState.pixel_invDepths, invdepth, sizeof(float) * width * height, cudaMemcpyDeviceToDevice), debug);
