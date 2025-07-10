@@ -473,7 +473,8 @@ PerGaussianRenderCUDA(
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
-	float* __restrict__ dL_dinvdepths
+	float* __restrict__ dL_dinvdepths,
+	int tile_size
 ) {
 	// global_bucket_idx = warp_idx
 	auto block = cg::this_thread_block();
@@ -530,8 +531,8 @@ PerGaussianRenderCUDA(
 	float Register_dL_dinvdepths = 0.0f;
 	
 	// tile metadata
-	const int tile_w = blockDim.x; // 即传入的 tile_size
-	const int tile_h = blockDim.y;
+	const int tile_w = tile_size;
+	const int tile_h = tile_size;
 	const int block_size = tile_w * tile_h;
 
 	const uint32_t horizontal_blocks = (W + tile_w - 1) / tile_w;
@@ -761,7 +762,8 @@ void BACKWARD::render(
 	float4* dL_dconic2D,
 	float* dL_dopacity,
 	float* dL_dcolors,
-	float* dL_dinvdepths)
+	float* dL_dinvdepths,
+	int tile_size)
 {
 	const int THREADS = 32;
 	PerGaussianRenderCUDA<NUM_CHANNELS_3DGS> <<<((B*32) + THREADS - 1) / THREADS,THREADS>>>(
@@ -787,6 +789,7 @@ void BACKWARD::render(
 		dL_dconic2D,
 		dL_dopacity,
 		dL_dcolors, 
-		dL_dinvdepths
+		dL_dinvdepths,
+		tile_size
 		);
 }
