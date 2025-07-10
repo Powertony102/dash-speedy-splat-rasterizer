@@ -17,10 +17,7 @@ A high-performance CUDA-based differentiable Gaussian rasterizer optimized for r
 - **Flexible Input Formats**: Support for both precomputed colors and spherical harmonics
 
 ### 🔧 Advanced Features
-- **Resolution-Adaptive Tiling**: 
-  - Low resolution (≤256×256): 32×32 tiles
-  - Medium resolution (≤512×512): 24×24 tiles  
-  - High resolution (>512×512): 16×16 tiles
+- **Resolution-Adaptive Tiling**
 - **Bucket-Based Sampling**: Efficient memory management with dynamic bucket allocation
 - **Depth Buffer Support**: Integrated depth buffer for proper occlusion handling
 - **Debug Mode**: Comprehensive debugging capabilities for development
