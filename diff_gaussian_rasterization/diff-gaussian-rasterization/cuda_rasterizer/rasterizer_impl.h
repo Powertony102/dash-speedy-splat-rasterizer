@@ -84,7 +84,7 @@ namespace CudaRasterizer
 		float *T;
 		float *ar;
 		float *ard;
-		static SampleState fromChunk(char*& chunk, size_t C);
+		static SampleState fromChunk(char*& chunk, size_t C, size_t block_size);
 	};
 
 	template<typename T> 

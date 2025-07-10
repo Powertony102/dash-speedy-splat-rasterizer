@@ -287,13 +287,13 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 	return img;
 }
 
-CudaRasterizer::SampleState CudaRasterizer::SampleState::fromChunk(char *& chunk, size_t C) {
-	SampleState sample;
-	obtain(chunk, sample.bucket_to_tile, C * BLOCK_SIZE, 128);
-	obtain(chunk, sample.T, C * BLOCK_SIZE, 128);
-	obtain(chunk, sample.ar, NUM_CHANNELS_3DGS * C * BLOCK_SIZE, 128);
-	obtain(chunk, sample.ard, C * BLOCK_SIZE, 128);
-	return sample;
+CudaRasterizer::SampleState CudaRasterizer::SampleState::fromChunk(char *& chunk, size_t C, size_t block_size) {
+    SampleState sample;
+    obtain(chunk, sample.bucket_to_tile, C * block_size, 128);
+    obtain(chunk, sample.T, C * block_size, 128);
+    obtain(chunk, sample.ar, NUM_CHANNELS_3DGS * C * block_size, 128);
+    obtain(chunk, sample.ard, C * block_size, 128);
+    return sample;
 }
 
 CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chunk, size_t P)
@@ -471,9 +471,10 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
 	unsigned int bucket_sum;
 	CHECK_CUDA(cudaMemcpy(&bucket_sum, imgState.bucket_offsets + num_tiles - 1, sizeof(unsigned int), cudaMemcpyDeviceToHost), debug);
 	// create a state to store. size is number is the total number of buckets * block_size
-	size_t sample_chunk_size = required<SampleState>(bucket_sum);
+	const size_t block_size = tile_size * tile_size;
+	size_t sample_chunk_size = bucket_sum * block_size * (sizeof(uint32_t) + sizeof(float) * (NUM_CHANNELS_3DGS + 2)) + 128;
 	char* sample_chunkptr = sampleBuffer(sample_chunk_size);
-	SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum);
+	SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum, block_size);
 
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
@@ -544,7 +545,7 @@ void CudaRasterizer::Rasterizer::backward(
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
 	ImageState imgState = ImageState::fromChunk(img_buffer, width * height);
-	SampleState sampleState = SampleState::fromChunk(sample_buffer, B);
+	SampleState sampleState = SampleState::fromChunk(sample_buffer, B, tile_size * tile_size);
 
 	if (radii == nullptr)
 	{

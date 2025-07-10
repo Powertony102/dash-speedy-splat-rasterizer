@@ -530,9 +530,13 @@ PerGaussianRenderCUDA(
 	float Register_dL_dinvdepths = 0.0f;
 	
 	// tile metadata
-	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	const int tile_w = blockDim.x; // 即传入的 tile_size
+	const int tile_h = blockDim.y;
+	const int block_size = tile_w * tile_h;
+
+	const uint32_t horizontal_blocks = (W + tile_w - 1) / tile_w;
 	const uint2 tile = {tile_id % horizontal_blocks, tile_id / horizontal_blocks};
-	const uint2 pix_min = {tile.x * BLOCK_X, tile.y * BLOCK_Y};
+	const uint2 pix_min = {tile.x * tile_w, tile.y * tile_h};
 
 	// values useful for gradient calculation
 	float T;
@@ -546,7 +550,7 @@ PerGaussianRenderCUDA(
 	const float ddely_dy = 0.5 * H;
 
 	// iterate over all pixels in the tile
-	for (int i = 0; i < BLOCK_SIZE + 31; ++i) {
+	for (int i = 0; i < block_size + 31; ++i) {
 		// SHUFFLING
 
 		// At this point, T already has my (1 - alpha) multiplied.
@@ -563,18 +567,18 @@ PerGaussianRenderCUDA(
 
 		// which pixel index should this thread deal with?
 		int idx = i - my_warp.thread_rank();
-		const uint2 pix = {pix_min.x + idx % BLOCK_X, pix_min.y + idx / BLOCK_X};
+		const uint2 pix = {pix_min.x + idx % tile_w, pix_min.y + idx / tile_w};
 		const uint32_t pix_id = W * pix.y + pix.x;
 		const float2 pixf = {(float) pix.x, (float) pix.y};
 		bool valid_pixel = pix.x < W && pix.y < H;
 		
 		// every 32nd thread should read the stored state from memory
 		// TODO: perhaps store these things in shared memory?
-		if (valid_splat && valid_pixel && my_warp.thread_rank() == 0 && idx < BLOCK_SIZE) {
-			T = sampled_T[global_bucket_idx * BLOCK_SIZE + idx];
+		if (valid_splat && valid_pixel && my_warp.thread_rank() == 0 && idx < block_size) {
+			T = sampled_T[global_bucket_idx * block_size + idx];
 			for (int ch = 0; ch < C; ++ch)
-				ar[ch] = -pixel_colors[ch * H * W + pix_id] + sampled_ar[global_bucket_idx * BLOCK_SIZE * C + ch * BLOCK_SIZE + idx];
-			ard = -pixel_invDepths[pix_id] + sampled_ard[global_bucket_idx * BLOCK_SIZE + idx];
+				ar[ch] = -pixel_colors[ch * H * W + pix_id] + sampled_ar[global_bucket_idx * block_size * C + ch * block_size + idx];
+			ard = -pixel_invDepths[pix_id] + sampled_ard[global_bucket_idx * block_size + idx];
 			T_final = final_Ts[pix_id];
 			last_contributor = n_contrib[pix_id];
 			for (int ch = 0; ch < C; ++ch) {
@@ -584,7 +588,7 @@ PerGaussianRenderCUDA(
 		}
 
 		// do work
-		if (valid_splat && valid_pixel && 0 <= idx && idx < BLOCK_SIZE) {
+		if (valid_splat && valid_pixel && 0 <= idx && idx < block_size) {
 			if (W <= pix.x || H <= pix.y) continue;
 
 			if (splat_idx_in_tile >= last_contributor) continue;

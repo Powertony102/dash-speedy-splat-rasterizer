@@ -84,7 +84,8 @@ namespace CudaRasterizer
 		float *T;
 		float *ar;
 		float *ard;
-		static SampleState fromChunk(char*& chunk, size_t C);
+		// 根据每 bucket 的实际 block_size(=tile_size^2) 进行切片
+		static SampleState fromChunk(char*& chunk, size_t C, size_t block_size);
 	};
 
 	template<typename T> 

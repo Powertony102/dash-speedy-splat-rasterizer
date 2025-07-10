@@ -339,7 +339,7 @@ __global__ void renderCUDA(
 
 	// write bucket_to_tile mapping
 	int num_buckets = (toDo + 31) / 32;
-	for(int i=block.thread_rank(); i<num_buckets; i+=BLOCK_SIZE)
+	for(int i=block.thread_rank(); i<num_buckets; i+=block_size)
 	{
 		bucket_to_tile[bbm + i] = tile_id;
 	}
@@ -376,10 +376,10 @@ __global__ void renderCUDA(
 			// Every 32 Gaussians, store sampled state
 			if((contributor % 32) == 0)
 			{
-				sampled_T[(bbm * BLOCK_SIZE) + block.thread_rank()] = T;
+				sampled_T[(bbm * block_size) + block.thread_rank()] = T;
 				for(int ch=0; ch<CHANNELS; ++ch)
-					sampled_ar[(bbm * BLOCK_SIZE * CHANNELS) + ch * BLOCK_SIZE + block.thread_rank()] = C[ch];
-				sampled_ard[(bbm * BLOCK_SIZE) + block.thread_rank()] = expected_invdepth;
+					sampled_ar[(bbm * block_size * CHANNELS) + ch * block_size + block.thread_rank()] = C[ch];
+				sampled_ard[(bbm * block_size) + block.thread_rank()] = expected_invdepth;
 				++bbm;
 			}
 

@@ -216,13 +216,15 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 	return binning;
 }
 
-// 新增 SampleState::fromChunk，实现 sample buffer 的切片
-CudaRasterizer::SampleState CudaRasterizer::SampleState::fromChunk(char*& chunk, size_t C) {
+// 更新 SampleState::fromChunk，使其支持可变 block_size（tile_size^2）
+CudaRasterizer::SampleState CudaRasterizer::SampleState::fromChunk(char*& chunk, size_t C, size_t block_size)
+{
     SampleState sample;
-    obtain(chunk, sample.bucket_to_tile, C * BLOCK_SIZE, 128);
-    obtain(chunk, sample.T, C * BLOCK_SIZE, 128);
-    obtain(chunk, sample.ar, NUM_CHANNELS_3DGS * C * BLOCK_SIZE, 128);
-    obtain(chunk, sample.ard, C * BLOCK_SIZE, 128);
+    // per-bucket 长度 = block_size
+    obtain(chunk, sample.bucket_to_tile, C * block_size, 128);
+    obtain(chunk, sample.T, C * block_size, 128);
+    obtain(chunk, sample.ar, NUM_CHANNELS_3DGS * C * block_size, 128);
+    obtain(chunk, sample.ard, C * block_size, 128);
     return sample;
 }
 
@@ -364,9 +366,16 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
     CHECK_CUDA(cudaMemcpy(&bucket_sum, imgState.bucket_offsets + num_tiles - 1, sizeof(unsigned int), cudaMemcpyDeviceToHost), debug);
 
     // ------------- Sample buffers ----------------------
-    size_t sample_chunk_size = required<SampleState>(bucket_sum);
+    // 每 bucket 需要存储：
+    //   bucket_to_tile  : uint32_t  (4B)
+    //   T              : float     (4B)
+    //   ar             : float*NUM_CHANNELS_3DGS (4B*NUM_CHANNELS_3DGS)
+    //   ard            : float     (4B)
+    const size_t block_size = tile_size * tile_size;
+    const size_t bytes_per_sample = sizeof(uint32_t) + sizeof(float) * (NUM_CHANNELS_3DGS + 2);
+    size_t sample_chunk_size = bucket_sum * block_size * bytes_per_sample + 128; // 加 128 作为对齐余量
     char* sample_chunkptr = sampleBuffer(sample_chunk_size);
-    SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum);
+    SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum, tile_size * tile_size);
 
     // ------------- Rendering ---------------------------
     const float* feature_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
@@ -442,7 +451,7 @@ void CudaRasterizer::Rasterizer::backward(
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
 	ImageState imgState = ImageState::fromChunk(image_buffer, width * height);
-	SampleState sampleState = SampleState::fromChunk(sample_buffer, B);
+	SampleState sampleState = SampleState::fromChunk(sample_buffer, B, tile_size * tile_size);
 
 	if (radii == nullptr)
 	{
