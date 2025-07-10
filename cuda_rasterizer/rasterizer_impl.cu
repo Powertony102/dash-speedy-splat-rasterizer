@@ -372,8 +372,23 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
     //   ar             : float*NUM_CHANNELS_3DGS (4B*NUM_CHANNELS_3DGS)
     //   ard            : float     (4B)
     const size_t block_size = tile_size * tile_size;
-    const size_t bytes_per_sample = sizeof(uint32_t) + sizeof(float) * (NUM_CHANNELS_3DGS + 2);
-    size_t sample_chunk_size = bucket_sum * block_size * bytes_per_sample + 128; // 加 128 作为对齐余量
+
+    auto align128 = [](size_t v) { return (v + 127) & (~(size_t)127); };
+    size_t sample_chunk_size = 0;
+    // bucket_to_tile
+    sample_chunk_size = align128(sample_chunk_size);
+    sample_chunk_size += bucket_sum * block_size * sizeof(uint32_t);
+    // T
+    sample_chunk_size = align128(sample_chunk_size);
+    sample_chunk_size += bucket_sum * block_size * sizeof(float);
+    // ar (NUM_CHANNELS_3DGS floats)
+    sample_chunk_size = align128(sample_chunk_size);
+    sample_chunk_size += bucket_sum * block_size * sizeof(float) * NUM_CHANNELS_3DGS;
+    // ard
+    sample_chunk_size = align128(sample_chunk_size);
+    sample_chunk_size += bucket_sum * block_size * sizeof(float);
+    // 额外余量
+    sample_chunk_size += 128;
     char* sample_chunkptr = sampleBuffer(sample_chunk_size);
     SampleState sampleState = SampleState::fromChunk(sample_chunkptr, bucket_sum, tile_size * tile_size);
 
