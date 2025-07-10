@@ -14,23 +14,10 @@
 #include "cuda_rasterizer/rasterizer.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("rasterize_gaussians", &RasterizeGaussiansCUDA, "Rasterize Gaussians");
-  m.def("rasterize_gaussians_backward", &RasterizeGaussiansBackwardCUDA, "Backward pass for rasterization of gaussians");
-  m.def("mark_visible", [](const torch::Tensor& means3D, const torch::Tensor& viewmatrix, const torch::Tensor& projmatrix) {
-    int P = means3D.size(0);
-    auto options = torch::TensorOptions().dtype(torch::kBool).device(means3D.device());
-    torch::Tensor visible = torch::empty({P}, options);
-
-    if (P > 0)
-    {
-        CudaRasterizer::Rasterizer::markVisible(
-            P,
-            (float*)means3D.contiguous().data_ptr<float>(),
-            (float*)viewmatrix.contiguous().data_ptr<float>(),
-            (float*)projmatrix.contiguous().data_ptr<float>(),
-            visible.contiguous().data_ptr<bool>()
-        );
-    }
-    return visible;
-  }, "Marks gaussians visible now");
+  m.def("rasterize_gaussians", &RasterizeGaussiansCUDA);
+  m.def("rasterize_gaussians_backward", &RasterizeGaussiansBackwardCUDA);
+  m.def("mark_visible", &markVisible);
+  m.def("adamUpdate", &adamUpdate);
+  m.def("fusedssim", &fusedssim);
+  m.def("fusedssim_backward", &fusedssim_backward);
 }
