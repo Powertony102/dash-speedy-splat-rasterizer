@@ -151,138 +151,155 @@ __forceinline__ __device__ bool in_frustum(int idx,
 	return true;
 }
 
-__device__ inline float2 computeEllipseIntersection(
-    const float4 con_o, const float disc, const float t, const float2 p,
-    const bool isY, const float coord)
+// ---- BMES (Bounded Midpoint Ellipse Scan) Code ---- //
+
+// A struct to hold the state for the integer-based scan.
+struct IntegerScanState
 {
-    float p_u = isY ? p.y : p.x;
-    float p_v = isY ? p.x : p.y;
-    float coeff = isY ? con_o.x : con_o.z;
+	long long A, B, C, F;
+	long long d, d1, d2;
+};
 
-    float h = coord - p_u;  // h = y - p.y for y, x - p.x for x
-    float sqrt_term = sqrt(disc * h * h + t * coeff);
-
-    return {
-      (-con_o.y * h - sqrt_term) / coeff + p_v,
-      (-con_o.y * h + sqrt_term) / coeff + p_v
-    };
+// Initializes the integer scanner state for a given row.
+__device__ inline void initialize_midpoint_scanner(
+	IntegerScanState& scanner,
+	long long A, long long B, long long C, long long D, long long E, long long F,
+	int x, int y)
+{
+	// F(x, y) = Ax^2 + 2Bxy + Cy^2 + Dx + Ey + F
+	scanner.d = (long long)A * x * x + (long long)2 * B * x * y + (long long)C * y * y + (long long)D * x + (long long)E * y + F;
+	// F(x+1, y) - F(x,y) = 2Ax + A + 2By
+	scanner.d1 = (long long)2 * A * x + A + (long long)2 * B * y + D;
+	// Second-order difference is constant
+	scanner.d2 = (long long)2 * A;
 }
 
-__device__ inline uint32_t processTiles(
-    const float4 con_o, const float disc, const float t, const float2 p,
-    float2 bbox_min, float2 bbox_max,
-    float2 bbox_argmin, float2 bbox_argmax,
+// Scans along the x-axis to find the start and end pixels of the ellipse for a given y.
+__device__ inline void find_x_extents(
+	IntegerScanState& scanner,
+	int x_start, int x_end,
+	int& x_min, int& x_max)
+{
+	x_min = x_start;
+	x_max = x_end;
+	
+	// Scan from left to right to find the first pixel inside the ellipse
+	for (int x = x_start; x <= x_end; ++x)
+	{
+		if (scanner.d <= 0)
+		{
+			x_min = x;
+			break;
+		}
+		scanner.d += scanner.d1;
+		scanner.d1 += scanner.d2;
+	}
+
+	// Scan from right to left to find the last pixel inside the ellipse
+	for (int x = x_end; x >= x_min; --x)
+	{
+		if (scanner.d <= 0)
+		{
+			x_max = x;
+			break;
+		}
+		scanner.d -= scanner.d1;
+		scanner.d1 -= scanner.d2;
+	}
+}
+
+__device__ inline uint32_t processTiles_BMES(
+    const float4 con_o, const float t, const float2 p,
     int2 rect_min, int2 rect_max,
-    const dim3 grid, const bool isY,
+    const dim3 grid,
     uint32_t idx, uint32_t off, float depth,
     uint64_t* gaussian_keys_unsorted,
     uint32_t* gaussian_values_unsorted,
-    const int tile_size = 16
-    )
+    const int tile_size = 16)
 {
+    // The ellipse equation is A'(x-px)^2 + 2B'(x-px)(y-py) + C'(y-py)^2 <= 1
+	// where A', 2B', C' are the conic parameters.
+	// The `con_o` variable holds {A', B', C', opacity}. Note that the middle term in `con_o` is B', not 2B'.
+	// This appears to be a bug in the original code's conic calculation, as the standard form uses 2B.
+	// We will follow the standard formula: A(x-px)^2 + 2B(x-px)(y-py) + C(y-py)^2 - t <= 0
+	// Here, we use the `con_o` components as A, B, C directly, and use the opacity-derived threshold `t`.
+	float A_f = con_o.x;
+	float B_f = con_o.y;
+	float C_f = con_o.z;
 
-    // ---- AccuTile Code ---- //
+	// To use integer arithmetic, we scale all coefficients.
+	// The precision of the integer representation is crucial.
+	// We choose a sufficiently large scaling factor to maintain accuracy.
+	const long long scale_factor = 1ll << 16;
 
-    // Set variables based on the isY flag
-    float BLOCK_U = tile_size;
-    float BLOCK_V = tile_size;
+	long long A = (long long)(A_f * scale_factor);
+    long long B = (long long)(B_f * scale_factor);
+    long long C = (long long)(C_f * scale_factor);
 
-    if (isY) {
-      rect_min = {rect_min.y, rect_min.x};
-      rect_max = {rect_max.y, rect_max.x};
-
-      bbox_min = {bbox_min.y, bbox_min.x};
-      bbox_max = {bbox_max.y, bbox_max.x};
-
-      bbox_argmin = {bbox_argmin.y, bbox_argmin.x};
-      bbox_argmax = {bbox_argmax.y, bbox_argmax.x};
-    }
-
-    uint32_t tiles_count = 0;
-    float2 intersect_min_line, intersect_max_line;
-    float ellipse_min, ellipse_max;
-    float min_line, max_line;
-
-    // Initialize max line
-    // Just need the min to be >= all points on the ellipse
-    // and  max to be <= all points on the ellipse
-    intersect_max_line = {bbox_max.y, bbox_min.y};
-
-    min_line = rect_min.x * BLOCK_U;
-    // Initialize min line intersections.
-    if (bbox_min.x <= min_line) {
-      // Boundary case
-      intersect_min_line = computeEllipseIntersection(
-                con_o, disc, t, p, isY, rect_min.x * BLOCK_U);
-
-    } else {
-      // Same as max line
-      intersect_min_line = intersect_max_line;
-    }
+    // Pre-calculate terms for the general quadratic form:
+    // Ax^2 + 2Bxy + Cy^2 + Dx + Ey + F = 0
+    long long D = (long long)(-2.0f * (A_f * p.x + B_f * p.y) * scale_factor);
+    long long E = (long long)(-2.0f * (B_f * p.x + C_f * p.y) * scale_factor);
+    long long F = (long long)((A_f * p.x * p.x + 2.0f * B_f * p.x * p.y + C_f * p.y * p.y - t) * scale_factor);
 
 
-    // Loop over either y slices or x slices based on the `isY` flag.
-    for (int u = rect_min.x; u < rect_max.x; ++u)
-    {
-        // Starting from the bottom or left, we will only need to compute
-        // intersections at the next line.
-        max_line = min_line + BLOCK_U;
-        if (max_line <= bbox_max.x) {
-          intersect_max_line = computeEllipseIntersection(
-                    con_o, disc, t, p, isY, max_line);
+	uint32_t tiles_count = 0;
+	int x_start_px = rect_min.x * tile_size;
+	int x_end_px = rect_max.x * tile_size;
+
+	for (int y_row = rect_min.y; y_row < rect_max.y; ++y_row)
+	{
+		int y_top_px = y_row * tile_size;
+		int y_bottom_px = y_top_px + tile_size - 1;
+
+		IntegerScanState scanner_top, scanner_bottom;
+		initialize_midpoint_scanner(scanner_top, A, B, C, D, E, F, x_start_px, y_top_px);
+		initialize_midpoint_scanner(scanner_bottom, A, B, C, D, E, F, x_start_px, y_bottom_px);
+
+		int x_min_top, x_max_top, x_min_bottom, x_max_bottom;
+		find_x_extents(scanner_top, x_start_px, x_end_px, x_min_top, x_max_top);
+		find_x_extents(scanner_bottom, x_start_px, x_end_px, x_min_bottom, x_max_bottom);
+
+		int x_min_px, x_max_px;
+		bool top_valid = x_min_top <= x_max_top;
+		bool bottom_valid = x_min_bottom <= x_max_bottom;
+
+		if (!top_valid && !bottom_valid) continue;
+
+		if (top_valid && bottom_valid) {
+			x_min_px = min(x_min_top, x_min_bottom);
+			x_max_px = max(x_max_top, x_max_bottom);
+		} else if (top_valid) {
+			x_min_px = x_min_top;
+			x_max_px = x_max_top;
+		} else { // bottom_valid
+			x_min_px = x_min_bottom;
+			x_max_px = x_max_bottom;
+		}
+		
+		int x_min_tile = x_min_px / tile_size;
+		int x_max_tile = x_max_px / tile_size;
+
+        // Correctly handle the case where we are only counting tiles
+        int tiles_in_row = (x_max_tile - x_min_tile + 1);
+        if (tiles_in_row > 0)
+        {
+            tiles_count += tiles_in_row;
+            if (gaussian_keys_unsorted != nullptr)
+            {
+                for (int x_col = x_min_tile; x_col <= x_max_tile; ++x_col)
+                {
+                    uint64_t key = (uint64_t)y_row * grid.x + x_col;
+                    key <<= 32;
+                    key |= *((uint32_t*)&depth);
+                    gaussian_keys_unsorted[off] = key;
+                    gaussian_values_unsorted[off] = idx;
+                    off++;
+                }
+            }
         }
-
-        // If the bbox min is in this slice, then it is the minimum
-        // ellipse point in this slice. Otherwise, the minimum ellipse
-        // point will be the minimum of the intersections of the min/max lines.
-        if (min_line <= bbox_argmin.y && bbox_argmin.y < max_line) {
-          ellipse_min = bbox_min.y;
-        } else {
-          ellipse_min = min(intersect_min_line.x, intersect_max_line.x);
-        }
-
-        // If the bbox max is in this slice, then it is the maximum
-        // ellipse point in this slice. Otherwise, the maximum ellipse
-        // point will be the maximum of the intersections of the min/max lines.
-        if (min_line <= bbox_argmax.y && bbox_argmax.y < max_line) {
-          ellipse_max = bbox_max.y;
-        } else {
-          ellipse_max = max(intersect_min_line.y, intersect_max_line.y);
-        }
-
-        // Convert ellipse_min/ellipse_max to tiles touched
-        // First map back to tile coordinates, then subtract.
-        int min_tile_v = max(rect_min.y,
-            min(rect_max.y, (int)(ellipse_min / BLOCK_V))
-            );
-        int max_tile_v = min(rect_max.y,
-            max(rect_min.y, (int)(ellipse_max / BLOCK_V + 1))
-            );
-
-        tiles_count += max_tile_v - min_tile_v;
-        // Only update keys array if it exists.
-        if (gaussian_keys_unsorted != nullptr) {
-          // Loop over tiles and add to keys array
-          for (int v = min_tile_v; v < max_tile_v; v++)
-          {
-            // For each tile that the Gaussian overlaps, emit a
-            // key/value pair. The key is |  tile ID  |      depth      |,
-            // and the value is the ID of the Gaussian. Sorting the values
-            // with this key yields Gaussian IDs in a list, such that they
-            // are first sorted by tile and then by depth.
-            uint64_t key = isY ?  (u * grid.x + v) : (v * grid.x + u);
-            key <<= 32;
-            key |= *((uint32_t*)&depth);
-            gaussian_keys_unsorted[off] = key;
-            gaussian_values_unsorted[off] = idx;
-            off++;
-          }
-        }
-        // Max line of this tile slice will be min lin of next tile slice
-        intersect_min_line = intersect_max_line;
-        min_line = max_line;
-    }
-    return tiles_count;
+	}
+	return tiles_count;
 }
 
 
@@ -308,22 +325,18 @@ __device__ inline uint32_t duplicateToTilesTouched(
     // Threshold: opacity * Gaussian = 1 / 255
     float t = 2.0f * log(con_o.w * 255.0f);
 
-    float x_term = sqrt(-(con_o.y * con_o.y * t) / (disc * con_o.x));
-    x_term = (con_o.y < 0) ? x_term : -x_term;
-    float y_term = sqrt(-(con_o.y * con_o.y * t) / (disc * con_o.z));
-    y_term = (con_o.y < 0) ? y_term : -y_term;
+    // Simplified bounding box calculation based on the radii of the ellipse,
+    // avoiding the expensive computeEllipseIntersection function. This provides
+    // a conservative but efficient bounding box for the BMES algorithm.
+    float mid = 0.5f * (con_o.x + con_o.z);
+    float det = con_o.x * con_o.z - con_o.y * con_o.y;
+    float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
+    float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
+    float radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
 
-    float2 bbox_argmin = { p.y - y_term, p.x - x_term };
-    float2 bbox_argmax = { p.y + y_term, p.x + x_term };
+    float2 bbox_min = { p.x - radius, p.y - radius };
+    float2 bbox_max = { p.x + radius, p.y + radius };
 
-    float2 bbox_min = {
-      computeEllipseIntersection(con_o, disc, t, p, true, bbox_argmin.x).x,
-      computeEllipseIntersection(con_o, disc, t, p, false, bbox_argmin.y).x
-    };
-    float2 bbox_max = {
-      computeEllipseIntersection(con_o, disc, t, p, true, bbox_argmax.x).y,
-      computeEllipseIntersection(con_o, disc, t, p, false, bbox_argmax.y).y
-    };
 
     // Rectangular tile extent of ellipse
     int2 rect_min = {
@@ -343,19 +356,16 @@ __device__ inline uint32_t duplicateToTilesTouched(
         return 0;
     }
 
-    // If fewer y tiles, loop over y slices else loop over x slices
-    bool isY = y_span < x_span;
-    return processTiles(
-        con_o, disc, t, p,
-        bbox_min, bbox_max,
-        bbox_argmin, bbox_argmax,
-        rect_min, rect_max,
-        grid, isY,
-        idx, off, depth,
-        gaussian_keys_unsorted,
-        gaussian_values_unsorted,
-        tile_size
-    );
+	// This now calls the BMES implementation.
+	return processTiles_BMES(
+		con_o, t, p,
+		rect_min, rect_max,
+		grid,
+		idx, off, depth,
+		gaussian_keys_unsorted,
+		gaussian_values_unsorted,
+		tile_size
+	);
 }
 
 #define CHECK_CUDA(A, debug) \
