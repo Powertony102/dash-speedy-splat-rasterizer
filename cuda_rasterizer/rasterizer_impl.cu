@@ -75,8 +75,8 @@ __global__ void duplicateWithKeys(
 	const uint32_t* offsets,
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
-	float4* con_o,
-  uint32_t* tiles_touched,
+	float4* conic_opacity,
+	uint32_t* tiles_touched,
 	dim3 grid,
 	const int tile_size)
 {
@@ -84,20 +84,108 @@ __global__ void duplicateWithKeys(
 	if (idx >= P)
 		return;
 
-	// Generate no key/value pair for invisible Gaussians
-	if (tiles_touched[idx] > 0)
-	{
-		// Find this Gaussian's offset in buffer for writing keys/values.
-		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
-    // Update unsorted arrays with Gaussian idx for every tile that
-    // Gaussian touches
-    duplicateToTilesTouched(
-        points_xy[idx], con_o[idx], grid,
-        idx, off, depths[idx],
-        gaussian_keys_unsorted,
-        gaussian_values_unsorted,
-        tile_size);
+	// Stop if this Gaussian is invisible
+	if (tiles_touched[idx] == 0)
+		return;
+
+	// ---- OctagonSplat: Start of new duplication logic ----
+
+	// 1. Re-calculate octagon vertices
+	float4 con_o = conic_opacity[idx];
+	float t = 2.f * log(255.f * con_o.w);
+	// No need to check t < 0, as tiles_touched > 0 check already handled it.
+
+	float a = con_o.x;
+	float b = con_o.y;
+	float c = con_o.z;
+
+	float2 V[8];
+	float b2 = b * b;
+	
+	float d1 = a + 2*b + c;
+	if (d1 <= 0.f) return;
+	float x1 = sqrtf(t * (b+c)*(b+c) / (d1 * (a*c - b2)));
+	V[4].x = x1; V[4].y = -(a+b)/(b+c) * x1;
+	V[5].x = -x1; V[5].y = -V[4].y;
+
+	float d2 = a - 2*b + c;
+	if (d2 <= 0.f) return;
+	float x2 = sqrtf(t * (c-b)*(c-b) / (d2 * (a*c - b2)));
+	V[0].x = x2; V[0].y = -(a-b)/(c-b) * x2;
+	V[1].x = -x2; V[1].y = -V[0].y;
+	
+	if(c == 0.f) return;
+	float x_m_inf = sqrtf(t * c / (a*c - b2));
+	V[2].x = x_m_inf; V[2].y = -b/c * x_m_inf;
+	V[3].x = -x_m_inf; V[3].y = -V[2].y;
+	
+	if(a == 0.f) return;
+	float y_m_0 = sqrtf(t * a / (a*c - b2));
+	V[6].y = y_m_0; V[6].x = -b/a * y_m_0;
+	V[7].y = -y_m_0; V[7].x = -V[6].x;
+
+	// Add center offset
+	#pragma unroll
+	for(int i = 0; i < 8; ++i) {
+		V[i] += points_xy[idx];
 	}
+
+	// 2. Coarse Culling: AABB
+	float2 min_coord = V[0], max_coord = V[0];
+	#pragma unroll
+	for(int i = 1; i < 8; ++i) {
+		min_coord.x = min(min_coord.x, V[i].x);
+		min_coord.y = min(min_coord.y, V[i].y);
+		max_coord.x = max(max_coord.x, V[i].x);
+		max_coord.y = max(max_coord.y, V[i].y);
+	}
+
+	int min_tile_x = max(0, (int)floor(min_coord.x / tile_size));
+	int max_tile_x = min((int)grid.x - 1, (int)floor(max_coord.x / tile_size));
+	int min_tile_y = max(0, (int)floor(min_coord.y / tile_size));
+	int max_tile_y = min((int)grid.y - 1, (int)floor(max_coord.y / tile_size));
+
+	// 3. Fine Culling & Key Generation
+	uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
+	uint32_t written_count = 0;
+
+	for (int ty = min_tile_y; ty <= max_tile_y; ++ty) {
+		for (int tx = min_tile_x; tx <= max_tile_x; ++tx) {
+			float2 tile_corners[4] = {
+				{(float)tx * tile_size, (float)ty * tile_size},
+				{(float)(tx+1) * tile_size, (float)ty * tile_size},
+				{(float)tx * tile_size, (float)(ty+1) * tile_size},
+				{(float)(tx+1) * tile_size, (float)(ty+1) * tile_size}
+			};
+
+			bool tile_is_outside = false;
+			#pragma unroll
+			for (int i = 0; i < 8; ++i) {
+				float2 v1 = V[i];
+				float2 v2 = V[(i + 1) % 8];
+				int out_count = 0;
+				#pragma unroll
+				for (int j = 0; j < 4; ++j) {
+					float edge_val = (tile_corners[j].x - v1.x) * (v2.y - v1.y) - (tile_corners[j].y - v1.y) * (v2.x - v1.x);
+					if (edge_val > 0) out_count++;
+				}
+				if (out_count == 4) {
+					tile_is_outside = true;
+					break;
+				}
+			}
+
+			if (!tile_is_outside) {
+				uint32_t tile_id = ty * grid.x + tx;
+				uint32_t depth_key = __float_as_uint(depths[idx]);
+				uint64_t key = ((uint64_t)tile_id << 32) | ((uint64_t)depth_key);
+				gaussian_keys_unsorted[off + written_count] = key;
+				gaussian_values_unsorted[off + written_count] = idx;
+				written_count++;
+			}
+		}
+	}
+	// ---- OctagonSplat: End of new duplication logic ----
 }
 
 // Check keys to see if it is at the start/end of one tile's range in 

@@ -222,28 +222,132 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		return;
 	float det_inv = 1.f / det;
 	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
-       // Compute extent in screen space (by finding eigenvalues of
-       // 2D covariance matrix). Use extent to compute a bounding rectangle
-       // of screen-space tiles that this Gaussian overlaps with. Quit if
-       // rectangle covers 0 tiles. 
-       float mid = 0.5f * (cov.x + cov.z);
-       float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
-       float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
-       float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
 
-  // Updated: Compute extent in screen space by identifying exact
-  // screen-space tile.overlap with Gaussian.
-  // No longer need radius
+	// ---- OctagonSplat: Start of new culling logic ----
+
+	// 1. Calculate t and check for visibility
+	float t = 2.f * log(255.f * opacities[idx]);
+	if (t < 0.0f) {
+		// Gaussian is too transparent to be visible, cull it.
+		return;
+	}
+
+	float a = conic.x;
+	float b = conic.y;
+	float c = conic.z;
+
+	// 2. Calculate the 8 vertices of the octagon
+	// V0, V1 are for slope m = -1
+	// V2, V3 are for slope inf
+	// V4, V5 are for slope 1
+	// V6, V7 are for slope 0
+	float2 V[8];
+	
+	// Pre-calculate reused terms
+	float b2 = b * b;
+	
+	// m = 1 & m = -1 (diagonal vertices)
+	float d1 = a + 2*b + c;
+	if (d1 <= 0.f) return;
+	float x1 = sqrtf(t * (b+c)*(b+c) / (d1 * (a*c - b2)));
+    V[4].x = x1; V[4].y = -(a+b)/(b+c) * x1;
+    V[5].x = -x1; V[5].y = -V[4].y;
+
+	float d2 = a - 2*b + c;
+    if (d2 <= 0.f) return;
+    float x2 = sqrtf(t * (c-b)*(c-b) / (d2 * (a*c - b2)));
+    V[0].x = x2; V[0].y = -(a-b)/(c-b) * x2;
+    V[1].x = -x2; V[1].y = -V[0].y;
+
+	// m = 0 & m = inf (axis-aligned vertices)
+    // Handle potential division by zero
+    if (c == 0.f) return;
+    float x_m_inf = sqrtf(t * c / (a*c - b2));
+    V[2].x = x_m_inf; V[2].y = -b/c * x_m_inf;
+    V[3].x = -x_m_inf; V[3].y = -V[2].y;
+    
+    if (a == 0.f) return;
+    float y_m_0 = sqrtf(t * a / (a*c - b2));
+    V[6].y = y_m_0; V[6].x = -b/a * y_m_0;
+    V[7].y = -y_m_0; V[7].x = -V[6].x;
+
+
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
-	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] };
-  // Only counts tiles touched when nullptr is passed as array argment.
-  uint32_t tiles_count = duplicateToTilesTouched(
-      point_image, con_o, grid,
-      0, 0, 0,
-      nullptr, nullptr,
-      tile_size);
-  if (tiles_count == 0)
-    return;
+
+	// Add center offset to all vertices
+	#pragma unroll
+	for(int i = 0; i < 8; ++i) {
+		V[i] += point_image;
+	}
+
+	// 3. Coarse Culling: Get AABB of the octagon
+	float2 min_coord = V[0], max_coord = V[0];
+	#pragma unroll
+	for(int i = 1; i < 8; ++i) {
+		min_coord.x = min(min_coord.x, V[i].x);
+		min_coord.y = min(min_coord.y, V[i].y);
+		max_coord.x = max(max_coord.x, V[i].x);
+		max_coord.y = max(max_coord.y, V[i].y);
+	}
+
+	// Convert AABB to tile coordinates
+	int min_tile_x = max(0, (int)floor(min_coord.x / tile_size));
+	int max_tile_x = min((int)grid.x - 1, (int)floor(max_coord.x / tile_size));
+	int min_tile_y = max(0, (int)floor(min_coord.y / tile_size));
+	int max_tile_y = min((int)grid.y - 1, (int)floor(max_coord.y / tile_size));
+
+	if (max_tile_x < min_tile_x || max_tile_y < min_tile_y) {
+        return;
+    }
+	
+	// 4. Fine Culling: Edge function tests for tiles in the AABB
+	uint32_t tiles_count = 0;
+	for (int ty = min_tile_y; ty <= max_tile_y; ++ty) {
+		for (int tx = min_tile_x; tx <= max_tile_x; ++tx) {
+			float2 tile_corners[4] = {
+				{(float)tx * tile_size, (float)ty * tile_size},
+				{(float)(tx+1) * tile_size, (float)ty * tile_size},
+				{(float)tx * tile_size, (float)(ty+1) * tile_size},
+				{(float)(tx+1) * tile_size, (float)(ty+1) * tile_size}
+			};
+
+			bool tile_is_outside = false;
+			// Check against each of the 8 edges of the octagon
+			#pragma unroll
+			for (int i = 0; i < 8; ++i) {
+				float2 v1 = V[i];
+				float2 v2 = V[(i + 1) % 8];
+				
+				// Check if all 4 corners of the tile are "outside" this edge
+				int out_count = 0;
+				#pragma unroll
+				for (int j = 0; j < 4; ++j) {
+					// Edge function
+					float edge_val = (tile_corners[j].x - v1.x) * (v2.y - v1.y) - (tile_corners[j].y - v1.y) * (v2.x - v1.x);
+					if (edge_val > 0) {
+						out_count++;
+					}
+				}
+
+				if (out_count == 4) {
+					// All corners are outside this edge, so the tile does not intersect
+					tile_is_outside = true;
+					break; // No need to check other edges
+				}
+			}
+
+			if (!tile_is_outside) {
+				// This tile intersects the octagon
+				tiles_count++;
+			}
+		}
+	}
+
+	if (tiles_count == 0) {
+		return;
+	}
+
+	// ---- OctagonSplat: End of new culling logic ----
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
@@ -257,11 +361,11 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Store some useful helper data for the next steps.
 	depths[idx] = p_view.z;
-       radii[idx] = my_radius;
+    radii[idx] = 0; // Radius is no longer used for culling
 	points_xy_image[idx] = point_image;
 	// Inverse 2D covariance and opacity neatly pack into one float4
-	conic_opacity[idx] = con_o;
-  tiles_touched[idx] = tiles_count;
+	conic_opacity[idx] = {conic.x, conic.y, conic.z, opacities[idx]};
+    tiles_touched[idx] = tiles_count;
 }
 
 // Main rasterization method. Collaboratively works on one tile per
