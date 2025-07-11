@@ -229,8 +229,8 @@ __global__ void computeCov2DCUDA(int P,
 	{
 		// https://www.wolframalpha.com/input?i=d+%28%28x*y+-+z%5E2%29%2F%28%28x%2Bw%29*%28y%2Bw%29+-+z%5E2%29%29+%2Fdx
 		// https://www.wolframalpha.com/input?i=d+%28%28x*y+-+z%5E2%29%2F%28%28x%2Bw%29*%28y%2Bw%29+-+z%5E2%29%29+%2Fdz
-		const float x = c_xx;
-		const float y = c_yy;
+		const float x = c_xx - h_var;
+		const float y = c_yy - h_var;
 		const float z = c_xy;
 		const float w = h_var;
 		const float denom_f = d_inside_root / sq(w * w + w * (x + y) + x * y - z * z);
