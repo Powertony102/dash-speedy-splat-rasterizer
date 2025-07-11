@@ -241,6 +241,12 @@ __global__ void computeCov2DCUDA(int P,
 		dL_dc_yy = dL_dy;
 		dL_dc_xy = dL_dz;
 	}
+
+	if (antialiasing)
+	{
+		c_xx -= h_var;
+		c_yy -= h_var;
+	}
 	
 	float denom = c_xx * c_yy - c_xy * c_xy;
 	float denom2inv = 1.0f / ((denom * denom) + 0.0000001f);
