@@ -97,30 +97,29 @@ __global__ void duplicateWithKeys(
 
 	float a = con_o.x;
 	float b = con_o.y;
-	float c = con_o.z;
 
 	float2 V[8];
 	float b2 = b * b;
 	
-	float d1 = a + 2*b + c;
+	float d1 = a + 2*b + con_o.z;
 	if (d1 <= 0.f) return;
-	float x1 = sqrtf(t * (b+c)*(b+c) / (d1 * (a*c - b2)));
-	V[4].x = x1; V[4].y = -(a+b)/(b+c) * x1;
+	float x1 = sqrtf(t * (b+con_o.z)*(b+con_o.z) / (d1 * (a*con_o.z - b2)));
+	V[4].x = x1; V[4].y = -(a+b)/(b+con_o.z) * x1;
 	V[5].x = -x1; V[5].y = -V[4].y;
-
-	float d2 = a - 2*b + c;
+	
+	float d2 = a - 2*b + con_o.z;
 	if (d2 <= 0.f) return;
-	float x2 = sqrtf(t * (c-b)*(c-b) / (d2 * (a*c - b2)));
-	V[0].x = x2; V[0].y = (a-b)/(c-b) * x2; // Fixed sign error here
+	float x2 = sqrtf(t * (con_o.z-b)*(con_o.z-b) / (d2 * (a*con_o.z - b2)));
+	V[0].x = x2; V[0].y = (a-b)/(con_o.z-b) * x2;
 	V[1].x = -x2; V[1].y = -V[0].y;
 	
-	if(c == 0.f) return;
-	float x_m_inf = sqrtf(t * c / (a*c - b2));
-	V[2].x = x_m_inf; V[2].y = -b/c * x_m_inf;
+	if(con_o.z == 0.f) return;
+	float x_m_inf = sqrtf(t * con_o.z / (a*con_o.z - b2));
+	V[2].x = x_m_inf; V[2].y = -b/con_o.z * x_m_inf;
 	V[3].x = -x_m_inf; V[3].y = -V[2].y;
-	
+		
 	if(a == 0.f) return;
-	float y_m_0 = sqrtf(t * a / (a*c - b2));
+	float y_m_0 = sqrtf(t * a / (a*con_o.z - b2));
 	V[6].y = y_m_0; V[6].x = -b/a * y_m_0;
 	V[7].y = -y_m_0; V[7].x = -V[6].x;
 

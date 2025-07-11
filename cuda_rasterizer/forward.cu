@@ -234,40 +234,32 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	float a = conic.x;
 	float b = conic.y;
-	float c = conic.z;
-
-	// 2. Calculate the 8 vertices of the octagon
-	// V0, V1 are for slope m = -1
-	// V2, V3 are for slope inf
-	// V4, V5 are for slope 1
-	// V6, V7 are for slope 0
-	float2 V[8];
 	
 	// Pre-calculate reused terms
 	float b2 = b * b;
 	
 	// m = 1 & m = -1 (diagonal vertices)
-	float d1 = a + 2*b + c;
+	float d1 = a + 2*b + conic.z;
 	if (d1 <= 0.f) return;
-	float x1 = sqrtf(t * (b+c)*(b+c) / (d1 * (a*c - b2)));
-    V[4].x = x1; V[4].y = -(a+b)/(b+c) * x1;
+	float x1 = sqrtf(t * (b+conic.z)*(b+conic.z) / (d1 * (a*conic.z - b2)));
+    V[4].x = x1; V[4].y = -(a+b)/(b+conic.z) * x1;
     V[5].x = -x1; V[5].y = -V[4].y;
 
-	float d2 = a - 2*b + c;
+	float d2 = a - 2*b + conic.z;
     if (d2 <= 0.f) return;
-    float x2 = sqrtf(t * (c-b)*(c-b) / (d2 * (a*c - b2)));
-    V[0].x = x2; V[0].y = (a-b)/(c-b) * x2; // Fixed sign error here
+    float x2 = sqrtf(t * (conic.z-b)*(conic.z-b) / (d2 * (a*conic.z - b2)));
+    V[0].x = x2; V[0].y = (a-b)/(conic.z-b) * x2;
     V[1].x = -x2; V[1].y = -V[0].y;
 
 	// m = 0 & m = inf (axis-aligned vertices)
     // Handle potential division by zero
-    if (c == 0.f) return;
-    float x_m_inf = sqrtf(t * c / (a*c - b2));
-    V[2].x = x_m_inf; V[2].y = -b/c * x_m_inf;
+    if (conic.z == 0.f) return;
+    float x_m_inf = sqrtf(t * conic.z / (a*conic.z - b2));
+    V[2].x = x_m_inf; V[2].y = -b/conic.z * x_m_inf;
     V[3].x = -x_m_inf; V[3].y = -V[2].y;
     
     if (a == 0.f) return;
-    float y_m_0 = sqrtf(t * a / (a*c - b2));
+    float y_m_0 = sqrtf(t * a / (a*conic.z - b2));
     V[6].y = y_m_0; V[6].x = -b/a * y_m_0;
     V[7].y = -y_m_0; V[7].x = -V[6].x;
 
