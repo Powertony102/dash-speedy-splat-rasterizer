@@ -217,19 +217,20 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Compute 2D screen-space covariance matrix
 	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
-
-	constexpr float h_var = 0.3f;
-	const float det_cov = cov.x * cov.z - cov.y * cov.y;
-	cov.x += h_var;
-	cov.z += h_var;
-	const float det_cov_plus_h_cov = cov.x * cov.z - cov.y * cov.y;
 	float h_convolution_scaling = 1.0f;
 
 	if(antialiasing)
+	{
+		constexpr float h_var = 0.3f;
+		const float det_cov = cov.x * cov.z - cov.y * cov.y;
+		cov.x += h_var;
+		cov.z += h_var;
+		const float det_cov_plus_h_cov = cov.x * cov.z - cov.y * cov.y;
 		h_convolution_scaling = sqrt(max(0.000025f, det_cov / det_cov_plus_h_cov)); // max for numerical stability
+	}
 
 	// Invert covariance (EWA algorithm)
-	const float det = det_cov_plus_h_cov;
+	const float det = cov.x * cov.z - cov.y * cov.y;
 
 	if (det == 0.0f)
 		return;
