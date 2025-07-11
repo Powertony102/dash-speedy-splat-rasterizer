@@ -277,7 +277,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Add center offset to all vertices
 	#pragma unroll
 	for(int i = 0; i < 8; ++i) {
-		V[i] += point_image;
+		V[i].x += point_image.x;
+		V[i].y += point_image.y;
 	}
 
 	// 3. Coarse Culling: Get AABB of the octagon

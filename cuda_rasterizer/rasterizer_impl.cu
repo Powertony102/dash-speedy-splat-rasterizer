@@ -127,7 +127,8 @@ __global__ void duplicateWithKeys(
 	// Add center offset
 	#pragma unroll
 	for(int i = 0; i < 8; ++i) {
-		V[i] += points_xy[idx];
+		V[i].x += points_xy[idx].x;
+		V[i].y += points_xy[idx].y;
 	}
 
 	// 2. Coarse Culling: AABB
