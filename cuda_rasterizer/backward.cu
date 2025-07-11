@@ -220,11 +220,6 @@ __global__ void computeCov2DCUDA(int P,
 		const float d_h_convolution_scaling = dL_dopacity_v * opacities[idx];
 		dL_dopacity[idx] = dL_dopacity_v * h_convolution_scaling;
 		d_inside_root = (det_cov / det_cov_plus_h_cov) <= 0.000025f ? 0.f : d_h_convolution_scaling / (2 * h_convolution_scaling);
-	} 
-	else
-	{
-		c_xx += h_var;
-		c_yy += h_var;
 	}
 	
 	float dL_dc_xx = 0;
