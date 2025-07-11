@@ -108,8 +108,6 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 
 	// Apply low-pass filter: every Gaussian should be at least
 	// one pixel wide/high. Discard 3rd row and column.
-	cov[0][0] += 0.3f;
-	cov[1][1] += 0.3f;
 	return { float(cov[0][0]), float(cov[0][1]), float(cov[1][1]) };
 }
 
@@ -218,22 +216,23 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Compute 2D screen-space covariance matrix
 	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
-
-	// Apply low-pass filter: every Gaussian should be at least
-	// one pixel wide/high. Discard 3rd row and column.
-	constexpr float h_var = 0.3f;
-	const float det_cov = cov.x * cov.z - cov.y * cov.y;
-	cov.x += h_var;
-	cov.z += h_var;
-	const float det_cov_plus_h_cov = cov.x * cov.z - cov.y * cov.y;
 	float h_convolution_scaling = 1.0f;
 
 	if(antialiasing)
+	{
+		// Apply low-pass filter: every Gaussian should be at least
+		// one pixel wide/high. Discard 3rd row and column.
+		constexpr float h_var = 0.3f;
+		const float det_cov = cov.x * cov.z - cov.y * cov.y;
+		cov.x += h_var;
+		cov.z += h_var;
+		const float det_cov_plus_h_cov = cov.x * cov.z - cov.y * cov.y;
 		h_convolution_scaling = sqrt(max(0.000025f, det_cov / det_cov_plus_h_cov)); // max for numerical stability
+	}
 
 	// Invert covariance (EWA algorithm)
 	// float det = (cov.x * cov.z - cov.y * cov.y);
-	float det = det_cov_plus_h_cov;
+	float det = cov.x * cov.z - cov.y * cov.y;
 
 	if (det == 0.0f)
 		return;
