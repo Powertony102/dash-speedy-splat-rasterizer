@@ -235,6 +235,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float a = conic.x;
 	float b = conic.y;
 	
+	// 2. Calculate the 8 vertices of the octagon
+	float2 V[8];
+
 	// Pre-calculate reused terms
 	float b2 = b * b;
 	
