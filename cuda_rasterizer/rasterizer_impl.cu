@@ -111,7 +111,7 @@ __global__ void duplicateWithKeys(
 	float d2 = a - 2*b + c;
 	if (d2 <= 0.f) return;
 	float x2 = sqrtf(t * (c-b)*(c-b) / (d2 * (a*c - b2)));
-	V[0].x = x2; V[0].y = -(a-b)/(c-b) * x2;
+	V[0].x = x2; V[0].y = (a-b)/(c-b) * x2; // Fixed sign error here
 	V[1].x = -x2; V[1].y = -V[0].y;
 	
 	if(c == 0.f) return;

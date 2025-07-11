@@ -218,7 +218,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Invert covariance (EWA algorithm)
 	float det = (cov.x * cov.z - cov.y * cov.y);
-	if (det == 0.0f)
+	if (det <= 0.0f) // Changed from == to <= to handle precision errors
 		return;
 	float det_inv = 1.f / det;
 	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
@@ -256,7 +256,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float d2 = a - 2*b + c;
     if (d2 <= 0.f) return;
     float x2 = sqrtf(t * (c-b)*(c-b) / (d2 * (a*c - b2)));
-    V[0].x = x2; V[0].y = -(a-b)/(c-b) * x2;
+    V[0].x = x2; V[0].y = (a-b)/(c-b) * x2; // Fixed sign error here
     V[1].x = -x2; V[1].y = -V[0].y;
 
 	// m = 0 & m = inf (axis-aligned vertices)
