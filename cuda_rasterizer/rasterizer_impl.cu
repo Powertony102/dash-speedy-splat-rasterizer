@@ -93,11 +93,13 @@ __global__ void duplicateWithKeys(
 		// Update unsorted arrays with Gaussian idx for every tile that
 		// Gaussian touches
 		float3 cov = { cov2Ds[idx*3], cov2Ds[idx*3+1], cov2Ds[idx*3+2] };
+		uint32_t dummy_count = 0; // Not used in writing pass
 		duplicateToTilesTouched(
 			points_xy[idx], cov, con_o[idx], grid,
 			idx, off, depths[idx],
 			gaussian_keys_unsorted,
 			gaussian_values_unsorted,
+			dummy_count,
 			tile_size);
 	}
 }

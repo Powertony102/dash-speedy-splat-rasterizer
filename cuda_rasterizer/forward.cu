@@ -233,12 +233,15 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
 	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] };
 
-	uint32_t tiles_count = duplicateToTilesTouched(
+	uint32_t dummy_off = 0; // Not used in counting pass
+	duplicateToTilesTouched(
 		point_image, cov, con_o, grid,
-		0, 0, 0,
+		0, dummy_off, 0,
 		nullptr, nullptr,
+		tiles_touched[idx],
 		tile_size);
-	if (tiles_count == 0)
+
+	if (tiles_touched[idx] == 0)
 		return;
 
 	// If colors have been precomputed, use them, otherwise convert
@@ -259,7 +262,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	cov2Ds[idx*3 + 2] = cov.z;
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	conic_opacity[idx] = con_o;
-	tiles_touched[idx] = tiles_count;
+	// tiles_touched[idx] is already set by duplicateToTilesTouched
 }
 
 // Main rasterization method. Collaboratively works on one tile per

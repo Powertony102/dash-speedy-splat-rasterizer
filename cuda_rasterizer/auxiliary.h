@@ -151,162 +151,135 @@ __forceinline__ __device__ bool in_frustum(int idx,
 	return true;
 }
 
-__device__ __forceinline__ uint32_t duplicateToTilesTouched(
+__device__ __forceinline__ void duplicateToTilesTouched(
 	const float2 p, float3 cov, const float4 con_o, const dim3 grid,
-	uint32_t idx, uint32_t off, float depth,
+	uint32_t idx, uint32_t& off, float depth,
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
+	uint32_t& tiles_count,
 	const int tile_size = 16)
 {
-	// cov = (sigma_xx, sigma_xy, sigma_yy)
-	float inv_a = cov.x;
-	float inv_b = cov.y;
-	float inv_c = cov.z;
-
-	// Inverse of covariance matrix
-	float det = inv_a * inv_c - inv_b * inv_b;
-	if (det == 0.0f) return 0;
-	float det_inv = 1.0f / det;
-	float a = inv_c * det_inv;
-	float b = -inv_b * det_inv;
-	float c = inv_a * det_inv;
-	
-	// t_alpha = -2 * log(alpha_threshold), e.g. alpha_threshold = 1/255
-	// We use a slightly different formula from the paper for dynamic radius based on opacity
-	float t = -2.0f * logf(max(con_o.w, 1.0f / 255.0f));
-	if (t <= 0.f) return 0;
-
-	// Extent of ellipse, corresponds to SnugBox
-	// a(x-px)^2 + 2b(x-px)(y-py) + c(y-py)^2 = t
-	float x_denom = a*c - b*b;
-	if (fabsf(x_denom) < 1e-9) return 0; // Avoid division by zero for straight lines
-
-	float y_dist = sqrtf(fmaxf(0.f, t * a / x_denom));
-	float y_min = p.y - y_dist;
-	float y_max = p.y + y_dist;
-	float x_at_ymin = p.x - (b/a) * (y_min - p.y);
-	float x_at_ymax = p.x - (b/a) * (y_max - p.y);
-
-	float x_dist = sqrtf(fmaxf(0.f, t * c / x_denom));
-	float x_min = p.x - x_dist;
-	float x_max = p.x + x_dist;
-	float y_at_xmin = p.y - (b/c) * (x_min - p.x);
-	float y_at_xmax = p.y - (b/c) * (x_max - p.x);
-
-	// Dual-SnugBox construction
-	float2 center = p;
-	float2 p_verts[4] = {
-		{x_min, y_at_xmin}, {x_max, y_at_xmax},
-		{x_at_ymin, y_min}, {x_at_ymax, y_max}
-	};
-	
-	float2 left_box_min = center;
-	float2 left_box_max = center;
-	float2 right_box_min = center;
-	float2 right_box_max = center;
-
-	bool is_left_box_init = false;
-	bool is_right_box_init = false;
-
-	#pragma unroll
-	for (int i = 0; i < 4; i++) {
-		if (p_verts[i].x <= center.x) {
-			if (!is_left_box_init) {
-				left_box_min = p_verts[i];
-				left_box_max = p_verts[i];
-				is_left_box_init = true;
-			} else {
-				left_box_min.x = fminf(left_box_min.x, p_verts[i].x);
-				left_box_min.y = fminf(left_box_min.y, p_verts[i].y);
-				left_box_max.x = fmaxf(left_box_max.x, p_verts[i].x);
-				left_box_max.y = fmaxf(left_box_max.y, p_verts[i].y);
-			}
-		}
-		if (p_verts[i].x >= center.x) {
-			if (!is_right_box_init) {
-				right_box_min = p_verts[i];
-				right_box_max = p_verts[i];
-				is_right_box_init = true;
-			} else {
-				right_box_min.x = fminf(right_box_min.x, p_verts[i].x);
-				right_box_min.y = fminf(right_box_min.y, p_verts[i].y);
-				right_box_max.x = fmaxf(right_box_max.x, p_verts[i].x);
-				right_box_max.y = fmaxf(right_box_max.y, p_verts[i].y);
-			}
-		}
-	}
-
-	left_box_min.x = fminf(left_box_min.x, center.x);
-	left_box_min.y = fminf(left_box_min.y, center.y);
-	left_box_max.x = fmaxf(left_box_max.x, center.x);
-	left_box_max.y = fmaxf(left_box_max.y, center.y);
-
-	right_box_min.x = fminf(right_box_min.x, center.x);
-	right_box_min.y = fminf(right_box_min.y, center.y);
-	right_box_max.x = fmaxf(right_box_max.x, center.x);
-	right_box_max.y = fmaxf(right_box_max.y, center.y);
-	
-	// Skew-Adaptive Stretching
-	float l0_left = left_box_max.x - left_box_min.x;
-	float l0_right = right_box_max.x - right_box_min.x;
-
-	float theta = 0.5f * atan2f(2.0f * cov.y, cov.x - cov.z);
-	float beta = 1.0f;
-	float stretch_factor;
-
-	// The original function s(θ) = 1 + |cos(2θ)| handles θ ≈ 0/90 degrees correctly,
-	// resulting in a stretch_factor of ~2.0.
-	// Per user feedback, we must ALSO stretch by 2.0 when θ ≈ 45 degrees.
-	// This corresponds to when |cos(2θ)| is close to 0.
-	float cos2theta = cosf(2.0f * theta);
-	const float epsilon = 0.01f; // Tolerance for 45-degree case
-	if (fabsf(cos2theta) < epsilon)
+	if (gaussian_keys_unsorted == nullptr)
 	{
-		// Case: θ is near 45 degrees. Force stretch factor to 2.0.
-		stretch_factor = 2.0f;
+		// This is the counting pass
+		// cov = (sigma_xx, sigma_xy, sigma_yy)
+		float inv_a = cov.x;
+		float inv_b = cov.y;
+		float inv_c = cov.z;
+
+		// Inverse of covariance matrix
+		float det = inv_a * inv_c - inv_b * inv_b;
+		if (det == 0.0f) return;
+		float det_inv = 1.0f / det;
+		float a = inv_c * det_inv, b = -inv_b * det_inv, c = inv_a * det_inv;
+		
+		float t = -2.0f * logf(max(con_o.w, 1.0f / 255.0f));
+		if (t <= 0.f) return;
+
+		// Extent of ellipse
+		float x_denom = a*c - b*b;
+		if (fabsf(x_denom) < 1e-9) return;
+
+		float y_dist = sqrtf(fmaxf(0.f, t * a / x_denom));
+		float y_min = p.y - y_dist, y_max = p.y + y_dist;
+		float x_at_ymin = p.x - (b/a) * (y_min - p.y), x_at_ymax = p.x - (b/a) * (y_max - p.y);
+		float x_dist = sqrtf(fmaxf(0.f, t * c / x_denom));
+		float x_min = p.x - x_dist, x_max = p.x + x_dist;
+		float y_at_xmin = p.y - (b/c) * (x_min - p.x), y_at_xmax = p.y - (b/c) * (x_max - p.x);
+		float2 center = p;
+		float2 p_verts[4] = {{x_min, y_at_xmin}, {x_max, y_at_xmax}, {x_at_ymin, y_min}, {x_at_ymax, y_max}};
+		float2 left_box_min = center, left_box_max = center, right_box_min = center, right_box_max = center;
+		bool is_left_box_init = false, is_right_box_init = false;
+		#pragma unroll
+		for (int i = 0; i < 4; i++) {
+			if (p_verts[i].x <= center.x) {
+				if (!is_left_box_init) { left_box_min = p_verts[i]; left_box_max = p_verts[i]; is_left_box_init = true; }
+				else { left_box_min.x = fminf(left_box_min.x, p_verts[i].x); left_box_min.y = fminf(left_box_min.y, p_verts[i].y); left_box_max.x = fmaxf(left_box_max.x, p_verts[i].x); left_box_max.y = fmaxf(left_box_max.y, p_verts[i].y); }
+			}
+			if (p_verts[i].x >= center.x) {
+				if (!is_right_box_init) { right_box_min = p_verts[i]; right_box_max = p_verts[i]; is_right_box_init = true; }
+				else { right_box_min.x = fminf(right_box_min.x, p_verts[i].x); right_box_min.y = fminf(right_box_min.y, p_verts[i].y); right_box_max.x = fmaxf(right_box_max.x, p_verts[i].x); right_box_max.y = fmaxf(right_box_max.y, p_verts[i].y); }
+			}
+		}
+		left_box_min.x = fminf(left_box_min.x, center.x); left_box_min.y = fminf(left_box_min.y, center.y);
+		left_box_max.x = fmaxf(left_box_max.x, center.x); left_box_max.y = fmaxf(left_box_max.y, center.y);
+		right_box_min.x = fminf(right_box_min.x, center.x); right_box_min.y = fminf(right_box_min.y, center.y);
+		right_box_max.x = fmaxf(right_box_max.x, center.x); right_box_max.y = fmaxf(right_box_max.y, center.y);
+		
+		// Skew-Adaptive Stretching
+		float l0_left = left_box_max.x - left_box_min.x, l0_right = right_box_max.x - right_box_min.x;
+		float theta = 0.5f * atan2f(2.0f * cov.y, cov.x - cov.z);
+		float beta = 1.0f; float stretch_factor;
+		float cos2theta = cosf(2.0f * theta); const float epsilon = 0.01f; 
+		if (fabsf(cos2theta) < epsilon) { stretch_factor = 2.0f; }
+		else { stretch_factor = 1.0f + beta * fabsf(cos2theta); }
+		float delta_left = (stretch_factor - 1.0f) * l0_left, delta_right = (stretch_factor - 1.0f) * l0_right;
+		left_box_min.x -= delta_left; right_box_max.x += delta_right;
+		rect_min = {(int)fmaxf(0.f, floorf(left_box_min.x / tile_size)), (int)fmaxf(0.f, floorf(fminf(left_box_min.y, right_box_min.y) / tile_size))};
+		rect_max = {(int)fminf((float)grid.x, ceilf(right_box_max.x / tile_size)), (int)fminf((float)grid.y, ceilf(fmaxf(left_box_max.y, right_box_max.y) / tile_size))};
+		tiles_count = (rect_max.x - rect_min.x) * (rect_max.y - rect_min.y);
 	}
 	else
 	{
-		// Default case: use the original function.
-		stretch_factor = 1.0f + beta * fabsf(cos2theta);
-	}
+		// This is the writing pass
+		int2 rect_min, rect_max; // Recompute bounds, should be same as in counting pass
+		// Re-computation logic is exactly the same as above
+		float inv_a = cov.x, inv_b = cov.y, inv_c = cov.z;
+		float det = inv_a * inv_c - inv_b * inv_b;
+		if (det == 0.0f) return;
+		float det_inv = 1.0f / det;
+		float a = inv_c * det_inv, b = -inv_b * det_inv, c = inv_a * det_inv;
+		float t = -2.0f * logf(max(con_o.w, 1.0f / 255.0f));
+		if (t <= 0.f) return;
+		float x_denom = a*c - b*b;
+		if (fabsf(x_denom) < 1e-9) return;
+		float y_dist = sqrtf(fmaxf(0.f, t * a / x_denom));
+		float y_min = p.y - y_dist, y_max = p.y + y_dist;
+		float x_at_ymin = p.x - (b/a) * (y_min - p.y), x_at_ymax = p.x - (b/a) * (y_max - p.y);
+		float x_dist = sqrtf(fmaxf(0.f, t * c / x_denom));
+		float x_min = p.x - x_dist, x_max = p.x + x_dist;
+		float y_at_xmin = p.y - (b/c) * (x_min - p.x), y_at_xmax = p.y - (b/c) * (x_max - p.x);
+		float2 center = p;
+		float2 p_verts[4] = {{x_min, y_at_xmin}, {x_max, y_at_xmax}, {x_at_ymin, y_min}, {x_at_ymax, y_max}};
+		float2 left_box_min = center, left_box_max = center, right_box_min = center, right_box_max = center;
+		bool is_left_box_init = false, is_right_box_init = false;
+		#pragma unroll
+		for (int i = 0; i < 4; i++) {
+			if (p_verts[i].x <= center.x) {
+				if (!is_left_box_init) { left_box_min = p_verts[i]; left_box_max = p_verts[i]; is_left_box_init = true; }
+				else { left_box_min.x = fminf(left_box_min.x, p_verts[i].x); left_box_min.y = fminf(left_box_min.y, p_verts[i].y); left_box_max.x = fmaxf(left_box_max.x, p_verts[i].x); left_box_max.y = fmaxf(left_box_max.y, p_verts[i].y); }
+			}
+			if (p_verts[i].x >= center.x) {
+				if (!is_right_box_init) { right_box_min = p_verts[i]; right_box_max = p_verts[i]; is_right_box_init = true; }
+				else { right_box_min.x = fminf(right_box_min.x, p_verts[i].x); right_box_min.y = fminf(right_box_min.y, p_verts[i].y); right_box_max.x = fmaxf(right_box_max.x, p_verts[i].x); right_box_max.y = fmaxf(right_box_max.y, p_verts[i].y); }
+			}
+		}
+		left_box_min.x = fminf(left_box_min.x, center.x); left_box_min.y = fminf(left_box_min.y, center.y);
+		left_box_max.x = fmaxf(left_box_max.x, center.x); left_box_max.y = fmaxf(left_box_max.y, center.y);
+		right_box_min.x = fminf(right_box_min.x, center.x); right_box_min.y = fminf(right_box_min.y, center.y);
+		right_box_max.x = fmaxf(right_box_max.x, center.x); right_box_max.y = fmaxf(right_box_max.y, center.y);
+		float l0_left = left_box_max.x - left_box_min.x, l0_right = right_box_max.x - right_box_min.x;
+		float theta = 0.5f * atan2f(2.0f * cov.y, cov.x - cov.z);
+		float beta = 1.0f; float stretch_factor;
+		float cos2theta = cosf(2.0f * theta); const float epsilon = 0.01f; 
+		if (fabsf(cos2theta) < epsilon) { stretch_factor = 2.0f; }
+		else { stretch_factor = 1.0f + beta * fabsf(cos2theta); }
+		float delta_left = (stretch_factor - 1.0f) * l0_left, delta_right = (stretch_factor - 1.0f) * l0_right;
+		left_box_min.x -= delta_left; right_box_max.x += delta_right;
+		rect_min = {(int)fmaxf(0.f, floorf(left_box_min.x / tile_size)), (int)fmaxf(0.f, floorf(fminf(left_box_min.y, right_box_min.y) / tile_size))};
+		rect_max = {(int)fminf((float)grid.x, ceilf(right_box_max.x / tile_size)), (int)fminf((float)grid.y, ceilf(fmaxf(left_box_max.y, right_box_max.y) / tile_size))};
 
-	float delta_left = (stretch_factor - 1.0f) * l0_left;
-	float delta_right = (stretch_factor - 1.0f) * l0_right;
-	
-	left_box_min.x -= delta_left;
-	right_box_max.x += delta_right;
-
-	// Union of two boxes for tile culling
-	int2 rect_min, rect_max;
-	rect_min = {
-		(int)fmaxf(0.f, floorf(left_box_min.x / tile_size)),
-		(int)fmaxf(0.f, floorf(fminf(left_box_min.y, right_box_min.y) / tile_size))
-	};
-	rect_max = {
-		(int)fminf((float)grid.x, ceilf(right_box_max.x / tile_size)),
-		(int)fminf((float)grid.y, ceilf(fmaxf(left_box_max.y, right_box_max.y) / tile_size))
-	};
-
-	uint32_t count = 0;
-	if (gaussian_keys_unsorted != nullptr)
-	{
 		for (int y = rect_min.y; y < rect_max.y; y++)
 		{
 			for (int x = rect_min.x; x < rect_max.x; x++)
 			{
 				uint32_t tile_idx = y * grid.x + x;
 				uint64_t key = ((uint64_t)tile_idx << 32) | (*(uint32_t*)&depth);
-				gaussian_keys_unsorted[off + count] = key;
-				gaussian_values_unsorted[off + count] = idx;
-				count++;
+				gaussian_keys_unsorted[off] = key;
+				gaussian_values_unsorted[off] = idx;
+				off++;
 			}
 		}
-		return count;
-	}
-	else
-	{
-		return (rect_max.x - rect_min.x) * (rect_max.y - rect_min.y);
 	}
 }
 
