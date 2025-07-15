@@ -215,8 +215,8 @@ __device__ __forceinline__ void duplicateToTilesTouched(
 		else { stretch_factor = 1.0f + beta * fabsf(cos2theta); }
 		float delta_left = (stretch_factor - 1.0f) * l0_left, delta_right = (stretch_factor - 1.0f) * l0_right;
 		left_box_min.x -= delta_left; right_box_max.x += delta_right;
-		rect_min = {(int)fmaxf(0.f, floorf(left_box_min.x / tile_size)), (int)fmaxf(0.f, floorf(fminf(left_box_min.y, right_box_min.y) / tile_size))};
-		rect_max = {(int)fminf((float)grid.x, ceilf(right_box_max.x / tile_size)), (int)fminf((float)grid.y, ceilf(fmaxf(left_box_max.y, right_box_max.y) / tile_size))};
+		int2 rect_min = {(int)fmaxf(0.f, floorf(left_box_min.x / tile_size)), (int)fmaxf(0.f, floorf(fminf(left_box_min.y, right_box_min.y) / tile_size))};
+		int2 rect_max = {(int)fminf((float)grid.x, ceilf(right_box_max.x / tile_size)), (int)fminf((float)grid.y, ceilf(fmaxf(left_box_max.y, right_box_max.y) / tile_size))};
 		tiles_count = (rect_max.x - rect_min.x) * (rect_max.y - rect_min.y);
 	}
 	else
