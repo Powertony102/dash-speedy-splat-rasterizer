@@ -69,6 +69,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             rotations,
             raster_settings.scale_modifier,
             cov3Ds_precomp,
+            scores,
             raster_settings.viewmatrix,
             raster_settings.projmatrix,
             raster_settings.tanfovx,
