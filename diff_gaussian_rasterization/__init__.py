@@ -63,6 +63,7 @@ class _RasterizeGaussians(torch.autograd.Function):
         args = (
             raster_settings.bg, 
             means3D,
+            means2D,
             colors_precomp,
             opacities,
             scales,
@@ -204,19 +205,19 @@ class GaussianRasterizer(nn.Module):
             raise Exception('Please provide exactly one of either scale/rotation pair or precomputed 3D covariance!')
         
         if shs is None:
-            shs = torch.Tensor([])
+            shs = torch.empty(0, device=means3D.device)
         if colors_precomp is None:
-            colors_precomp = torch.Tensor([])
+            colors_precomp = torch.empty(0, device=means3D.device)
 
         if scores is None:
-            scores = torch.Tensor([])
+            scores = torch.empty(0, device=means3D.device)
 
         if scales is None:
-            scales = torch.Tensor([])
+            scales = torch.empty(0, device=means3D.device)
         if rotations is None:
-            rotations = torch.Tensor([])
+            rotations = torch.empty(0, device=means3D.device)
         if cov3D_precomp is None:
-            cov3D_precomp = torch.Tensor([])
+            cov3D_precomp = torch.empty(0, device=means3D.device)
 
         # Invoke C++/CUDA rasterization routine
         return rasterize_gaussians(
