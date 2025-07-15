@@ -173,6 +173,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float2* points_xy_image,
 	float* depths,
 	float* cov3Ds,
+	float* cov2Ds,
 	float* rgb,
 	float4* conic_opacity,
 	const dim3 grid,
@@ -222,28 +223,23 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		return;
 	float det_inv = 1.f / det;
 	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
-       // Compute extent in screen space (by finding eigenvalues of
-       // 2D covariance matrix). Use extent to compute a bounding rectangle
-       // of screen-space tiles that this Gaussian overlaps with. Quit if
-       // rectangle covers 0 tiles. 
-       float mid = 0.5f * (cov.x + cov.z);
-       float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
-       float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
-       float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+	
+	// Compute extent in screen space.
+	// Keep track of radius for visibility testing.
+	float mid = 0.5f * (cov.x + cov.z);
+	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
+	radii[idx] = ceil(3.f * sqrt(max(lambda1, 0.f)));
 
-  // Updated: Compute extent in screen space by identifying exact
-  // screen-space tile.overlap with Gaussian.
-  // No longer need radius
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
 	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] };
-  // Only counts tiles touched when nullptr is passed as array argment.
-  uint32_t tiles_count = duplicateToTilesTouched(
-      point_image, con_o, grid,
-      0, 0, 0,
-      nullptr, nullptr,
-      tile_size);
-  if (tiles_count == 0)
-    return;
+
+	uint32_t tiles_count = duplicateToTilesTouched(
+		point_image, cov, con_o, grid,
+		0, 0, 0,
+		nullptr, nullptr,
+		tile_size);
+	if (tiles_count == 0)
+		return;
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
@@ -257,11 +253,13 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Store some useful helper data for the next steps.
 	depths[idx] = p_view.z;
-       radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
+	cov2Ds[idx*3 + 0] = cov.x;
+	cov2Ds[idx*3 + 1] = cov.y;
+	cov2Ds[idx*3 + 2] = cov.z;
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	conic_opacity[idx] = con_o;
-  tiles_touched[idx] = tiles_count;
+	tiles_touched[idx] = tiles_count;
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -437,6 +435,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	float2* means2D,
 	float* depths,
 	float* cov3Ds,
+	float* cov2Ds,
 	float* rgb,
 	float4* conic_opacity,
 	const dim3 grid,
@@ -465,6 +464,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		means2D,
 		depths,
 		cov3Ds,
+		cov2Ds,
 		rgb,
 		conic_opacity,
 		grid,

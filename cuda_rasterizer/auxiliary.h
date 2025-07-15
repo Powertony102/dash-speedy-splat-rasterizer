@@ -151,211 +151,163 @@ __forceinline__ __device__ bool in_frustum(int idx,
 	return true;
 }
 
-__device__ inline float2 computeEllipseIntersection(
-    const float4 con_o, const float disc, const float t, const float2 p,
-    const bool isY, const float coord)
+__device__ __forceinline__ uint32_t duplicateToTilesTouched(
+	const float2 p, float3 cov, const float4 con_o, const dim3 grid,
+	uint32_t idx, uint32_t off, float depth,
+	uint64_t* gaussian_keys_unsorted,
+	uint32_t* gaussian_values_unsorted,
+	const int tile_size = 16)
 {
-    float p_u = isY ? p.y : p.x;
-    float p_v = isY ? p.x : p.y;
-    float coeff = isY ? con_o.x : con_o.z;
+	// cov = (sigma_xx, sigma_xy, sigma_yy)
+	float inv_a = cov.x;
+	float inv_b = cov.y;
+	float inv_c = cov.z;
 
-    float h = coord - p_u;  // h = y - p.y for y, x - p.x for x
-    float sqrt_term = sqrt(disc * h * h + t * coeff);
+	// Inverse of covariance matrix
+	float det = inv_a * inv_c - inv_b * inv_b;
+	if (det == 0.0f) return 0;
+	float det_inv = 1.0f / det;
+	float a = inv_c * det_inv;
+	float b = -inv_b * det_inv;
+	float c = inv_a * det_inv;
+	
+	// t_alpha = -2 * log(alpha_threshold), e.g. alpha_threshold = 1/255
+	// We use a slightly different formula from the paper for dynamic radius based on opacity
+	float t = -2.0f * logf(max(con_o.w, 1.0f / 255.0f));
+	if (t <= 0.f) return 0;
 
-    return {
-      (-con_o.y * h - sqrt_term) / coeff + p_v,
-      (-con_o.y * h + sqrt_term) / coeff + p_v
-    };
-}
+	// Extent of ellipse, corresponds to SnugBox
+	// a(x-px)^2 + 2b(x-px)(y-py) + c(y-py)^2 = t
+	float x_denom = a*c - b*b;
+	if (fabsf(x_denom) < 1e-9) return 0; // Avoid division by zero for straight lines
 
-__device__ inline uint32_t processTiles(
-    const float4 con_o, const float disc, const float t, const float2 p,
-    float2 bbox_min, float2 bbox_max,
-    float2 bbox_argmin, float2 bbox_argmax,
-    int2 rect_min, int2 rect_max,
-    const dim3 grid, const bool isY,
-    uint32_t idx, uint32_t off, float depth,
-    uint64_t* gaussian_keys_unsorted,
-    uint32_t* gaussian_values_unsorted,
-    const int tile_size = 16
-    )
-{
+	float y_dist = sqrtf(fmaxf(0.f, t * a / x_denom));
+	float y_min = p.y - y_dist;
+	float y_max = p.y + y_dist;
+	float x_at_ymin = p.x - (b/a) * (y_min - p.y);
+	float x_at_ymax = p.x - (b/a) * (y_max - p.y);
 
-    // ---- AccuTile Code ---- //
+	float x_dist = sqrtf(fmaxf(0.f, t * c / x_denom));
+	float x_min = p.x - x_dist;
+	float x_max = p.x + x_dist;
+	float y_at_xmin = p.y - (b/c) * (x_min - p.x);
+	float y_at_xmax = p.y - (b/c) * (x_max - p.x);
 
-    // Set variables based on the isY flag
-    float BLOCK_U = tile_size;
-    float BLOCK_V = tile_size;
+	// Dual-SnugBox construction
+	float2 center = p;
+	float2 p_verts[4] = {
+		{x_min, y_at_xmin}, {x_max, y_at_xmax},
+		{x_at_ymin, y_min}, {x_at_ymax, y_max}
+	};
+	
+	float2 left_box_min = center;
+	float2 left_box_max = center;
+	float2 right_box_min = center;
+	float2 right_box_max = center;
 
-    if (isY) {
-      rect_min = {rect_min.y, rect_min.x};
-      rect_max = {rect_max.y, rect_max.x};
+	bool is_left_box_init = false;
+	bool is_right_box_init = false;
 
-      bbox_min = {bbox_min.y, bbox_min.x};
-      bbox_max = {bbox_max.y, bbox_max.x};
+	#pragma unroll
+	for (int i = 0; i < 4; i++) {
+		if (p_verts[i].x <= center.x) {
+			if (!is_left_box_init) {
+				left_box_min = p_verts[i];
+				left_box_max = p_verts[i];
+				is_left_box_init = true;
+			} else {
+				left_box_min.x = fminf(left_box_min.x, p_verts[i].x);
+				left_box_min.y = fminf(left_box_min.y, p_verts[i].y);
+				left_box_max.x = fmaxf(left_box_max.x, p_verts[i].x);
+				left_box_max.y = fmaxf(left_box_max.y, p_verts[i].y);
+			}
+		}
+		if (p_verts[i].x >= center.x) {
+			if (!is_right_box_init) {
+				right_box_min = p_verts[i];
+				right_box_max = p_verts[i];
+				is_right_box_init = true;
+			} else {
+				right_box_min.x = fminf(right_box_min.x, p_verts[i].x);
+				right_box_min.y = fminf(right_box_min.y, p_verts[i].y);
+				right_box_max.x = fmaxf(right_box_max.x, p_verts[i].x);
+				right_box_max.y = fmaxf(right_box_max.y, p_verts[i].y);
+			}
+		}
+	}
 
-      bbox_argmin = {bbox_argmin.y, bbox_argmin.x};
-      bbox_argmax = {bbox_argmax.y, bbox_argmax.x};
-    }
+	left_box_min.x = fminf(left_box_min.x, center.x);
+	left_box_min.y = fminf(left_box_min.y, center.y);
+	left_box_max.x = fmaxf(left_box_max.x, center.x);
+	left_box_max.y = fmaxf(left_box_max.y, center.y);
 
-    uint32_t tiles_count = 0;
-    float2 intersect_min_line, intersect_max_line;
-    float ellipse_min, ellipse_max;
-    float min_line, max_line;
+	right_box_min.x = fminf(right_box_min.x, center.x);
+	right_box_min.y = fminf(right_box_min.y, center.y);
+	right_box_max.x = fmaxf(right_box_max.x, center.x);
+	right_box_max.y = fmaxf(right_box_max.y, center.y);
+	
+	// Skew-Adaptive Stretching
+	float l0_left = left_box_max.x - left_box_min.x;
+	float l0_right = right_box_max.x - right_box_min.x;
 
-    // Initialize max line
-    // Just need the min to be >= all points on the ellipse
-    // and  max to be <= all points on the ellipse
-    intersect_max_line = {bbox_max.y, bbox_min.y};
+	float theta = 0.5f * atan2f(2.0f * cov.y, cov.x - cov.z);
+	float beta = 1.0f;
+	float stretch_factor;
 
-    min_line = rect_min.x * BLOCK_U;
-    // Initialize min line intersections.
-    if (bbox_min.x <= min_line) {
-      // Boundary case
-      intersect_min_line = computeEllipseIntersection(
-                con_o, disc, t, p, isY, rect_min.x * BLOCK_U);
+	// The original function s(θ) = 1 + |cos(2θ)| handles θ ≈ 0/90 degrees correctly,
+	// resulting in a stretch_factor of ~2.0.
+	// Per user feedback, we must ALSO stretch by 2.0 when θ ≈ 45 degrees.
+	// This corresponds to when |cos(2θ)| is close to 0.
+	float cos2theta = cosf(2.0f * theta);
+	const float epsilon = 0.01f; // Tolerance for 45-degree case
+	if (fabsf(cos2theta) < epsilon)
+	{
+		// Case: θ is near 45 degrees. Force stretch factor to 2.0.
+		stretch_factor = 2.0f;
+	}
+	else
+	{
+		// Default case: use the original function.
+		stretch_factor = 1.0f + beta * fabsf(cos2theta);
+	}
 
-    } else {
-      // Same as max line
-      intersect_min_line = intersect_max_line;
-    }
+	float delta_left = (stretch_factor - 1.0f) * l0_left;
+	float delta_right = (stretch_factor - 1.0f) * l0_right;
+	
+	left_box_min.x -= delta_left;
+	right_box_max.x += delta_right;
 
+	// Union of two boxes for tile culling
+	int2 rect_min, rect_max;
+	rect_min = {
+		(int)fmaxf(0.f, floorf(left_box_min.x / tile_size)),
+		(int)fmaxf(0.f, floorf(fminf(left_box_min.y, right_box_min.y) / tile_size))
+	};
+	rect_max = {
+		(int)fminf((float)grid.x, ceilf(right_box_max.x / tile_size)),
+		(int)fminf((float)grid.y, ceilf(fmaxf(left_box_max.y, right_box_max.y) / tile_size))
+	};
 
-    // Loop over either y slices or x slices based on the `isY` flag.
-    for (int u = rect_min.x; u < rect_max.x; ++u)
-    {
-        // Starting from the bottom or left, we will only need to compute
-        // intersections at the next line.
-        max_line = min_line + BLOCK_U;
-        if (max_line <= bbox_max.x) {
-          intersect_max_line = computeEllipseIntersection(
-                    con_o, disc, t, p, isY, max_line);
-        }
-
-        // If the bbox min is in this slice, then it is the minimum
-        // ellipse point in this slice. Otherwise, the minimum ellipse
-        // point will be the minimum of the intersections of the min/max lines.
-        if (min_line <= bbox_argmin.y && bbox_argmin.y < max_line) {
-          ellipse_min = bbox_min.y;
-        } else {
-          ellipse_min = min(intersect_min_line.x, intersect_max_line.x);
-        }
-
-        // If the bbox max is in this slice, then it is the maximum
-        // ellipse point in this slice. Otherwise, the maximum ellipse
-        // point will be the maximum of the intersections of the min/max lines.
-        if (min_line <= bbox_argmax.y && bbox_argmax.y < max_line) {
-          ellipse_max = bbox_max.y;
-        } else {
-          ellipse_max = max(intersect_min_line.y, intersect_max_line.y);
-        }
-
-        // Convert ellipse_min/ellipse_max to tiles touched
-        // First map back to tile coordinates, then subtract.
-        int min_tile_v = max(rect_min.y,
-            min(rect_max.y, (int)(ellipse_min / BLOCK_V))
-            );
-        int max_tile_v = min(rect_max.y,
-            max(rect_min.y, (int)(ellipse_max / BLOCK_V + 1))
-            );
-
-        tiles_count += max_tile_v - min_tile_v;
-        // Only update keys array if it exists.
-        if (gaussian_keys_unsorted != nullptr) {
-          // Loop over tiles and add to keys array
-          for (int v = min_tile_v; v < max_tile_v; v++)
-          {
-            // For each tile that the Gaussian overlaps, emit a
-            // key/value pair. The key is |  tile ID  |      depth      |,
-            // and the value is the ID of the Gaussian. Sorting the values
-            // with this key yields Gaussian IDs in a list, such that they
-            // are first sorted by tile and then by depth.
-            uint64_t key = isY ?  (u * grid.x + v) : (v * grid.x + u);
-            key <<= 32;
-            key |= *((uint32_t*)&depth);
-            gaussian_keys_unsorted[off] = key;
-            gaussian_values_unsorted[off] = idx;
-            off++;
-          }
-        }
-        // Max line of this tile slice will be min lin of next tile slice
-        intersect_min_line = intersect_max_line;
-        min_line = max_line;
-    }
-    return tiles_count;
-}
-
-
-__device__ inline uint32_t duplicateToTilesTouched(
-    const float2 p, const float4 con_o, const dim3 grid,
-    uint32_t idx, uint32_t off, float depth,
-    uint64_t* gaussian_keys_unsorted,
-    uint32_t* gaussian_values_unsorted,
-    const int tile_size = 16
-    )
-{
-
-    //  ---- SNUGBOX Code ---- //
-
-    // Calculate discriminant
-    float disc = con_o.y * con_o.y - con_o.x * con_o.z;
-
-    // If ill-formed ellipse, return 0
-    if (con_o.x <= 0 || con_o.z <= 0 || disc >= 0) {
-        return 0;
-    }
-
-    // Threshold: opacity * Gaussian = 1 / 255
-    float t = 2.0f * log(con_o.w * 255.0f);
-
-    float x_term = sqrt(-(con_o.y * con_o.y * t) / (disc * con_o.x));
-    x_term = (con_o.y < 0) ? x_term : -x_term;
-    float y_term = sqrt(-(con_o.y * con_o.y * t) / (disc * con_o.z));
-    y_term = (con_o.y < 0) ? y_term : -y_term;
-
-    float2 bbox_argmin = { p.y - y_term, p.x - x_term };
-    float2 bbox_argmax = { p.y + y_term, p.x + x_term };
-
-    float2 bbox_min = {
-      computeEllipseIntersection(con_o, disc, t, p, true, bbox_argmin.x).x,
-      computeEllipseIntersection(con_o, disc, t, p, false, bbox_argmin.y).x
-    };
-    float2 bbox_max = {
-      computeEllipseIntersection(con_o, disc, t, p, true, bbox_argmax.x).y,
-      computeEllipseIntersection(con_o, disc, t, p, false, bbox_argmax.y).y
-    };
-
-    // Rectangular tile extent of ellipse
-    int2 rect_min = {
-        max(0, min((int)grid.x, (int)(bbox_min.x / tile_size))),
-        max(0, min((int)grid.y, (int)(bbox_min.y / tile_size)))
-    };
-    int2 rect_max = {
-        max(0, min((int)grid.x, (int)(bbox_max.x / tile_size + 1))),
-        max(0, min((int)grid.y, (int)(bbox_max.y / tile_size + 1)))
-    };
-
-    int y_span = rect_max.y - rect_min.y;
-    int x_span = rect_max.x - rect_min.x;
-
-    // If no tiles are touched, return 0
-    if (y_span * x_span == 0) {
-        return 0;
-    }
-
-    // If fewer y tiles, loop over y slices else loop over x slices
-    bool isY = y_span < x_span;
-    return processTiles(
-        con_o, disc, t, p,
-        bbox_min, bbox_max,
-        bbox_argmin, bbox_argmax,
-        rect_min, rect_max,
-        grid, isY,
-        idx, off, depth,
-        gaussian_keys_unsorted,
-        gaussian_values_unsorted,
-        tile_size
-    );
+	uint32_t count = 0;
+	if (gaussian_keys_unsorted != nullptr)
+	{
+		for (int y = rect_min.y; y < rect_max.y; y++)
+		{
+			for (int x = rect_min.x; x < rect_max.x; x++)
+			{
+				uint32_t tile_idx = y * grid.x + x;
+				uint64_t key = ((uint64_t)tile_idx << 32) | (*(uint32_t*)&depth);
+				gaussian_keys_unsorted[off + count] = key;
+				gaussian_values_unsorted[off + count] = idx;
+				count++;
+			}
+		}
+		return count;
+	}
+	else
+	{
+		return (rect_max.x - rect_min.x) * (rect_max.y - rect_min.y);
+	}
 }
 
 #define CHECK_CUDA(A, debug) \

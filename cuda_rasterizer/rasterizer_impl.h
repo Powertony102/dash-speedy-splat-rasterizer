@@ -35,12 +35,27 @@ namespace CudaRasterizer
 		int* internal_radii;
 		float2* means2D;
 		float* cov3D;
+		float* cov2Ds;
 		float4* conic_opacity;
 		float* rgb;
 		uint32_t* point_offsets;
 		uint32_t* tiles_touched;
 
-		static GeometryState fromChunk(char*& chunk, size_t P);
+		static GeometryState fromChunk(char*& chunk, size_t P)
+		{
+			GeometryState geom;
+			obtain(chunk, geom.depths, P, 128);
+			obtain(chunk, geom.clamped, P * 3, 128);
+			obtain(chunk, geom.internal_radii, P, 128);
+			obtain(chunk, geom.means2D, P, 128);
+			obtain(chunk, geom.cov3D, P * 6, 128);
+			obtain(chunk, geom.cov2Ds, P * 3, 128);
+			obtain(chunk, geom.conic_opacity, P, 128);
+			obtain(chunk, geom.rgb, P * 3, 128);
+			obtain(chunk, geom.tiles_touched, P, 128);
+			cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
+			return geom;
+		}
 	};
 
 	struct ImageState

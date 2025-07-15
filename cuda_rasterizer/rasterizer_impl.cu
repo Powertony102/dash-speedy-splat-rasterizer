@@ -72,11 +72,12 @@ __global__ void duplicateWithKeys(
 	int P,
 	const float2* points_xy,
 	const float* depths,
+	const float* cov2Ds,
 	const uint32_t* offsets,
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
 	float4* con_o,
-  uint32_t* tiles_touched,
+	uint32_t* tiles_touched,
 	dim3 grid,
 	const int tile_size)
 {
@@ -89,14 +90,15 @@ __global__ void duplicateWithKeys(
 	{
 		// Find this Gaussian's offset in buffer for writing keys/values.
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
-    // Update unsorted arrays with Gaussian idx for every tile that
-    // Gaussian touches
-    duplicateToTilesTouched(
-        points_xy[idx], con_o[idx], grid,
-        idx, off, depths[idx],
-        gaussian_keys_unsorted,
-        gaussian_values_unsorted,
-        tile_size);
+		// Update unsorted arrays with Gaussian idx for every tile that
+		// Gaussian touches
+		float3 cov = { cov2Ds[idx*3], cov2Ds[idx*3+1], cov2Ds[idx*3+2] };
+		duplicateToTilesTouched(
+			points_xy[idx], cov, con_o[idx], grid,
+			idx, off, depths[idx],
+			gaussian_keys_unsorted,
+			gaussian_values_unsorted,
+			tile_size);
 	}
 }
 
@@ -293,13 +295,14 @@ int CudaRasterizer::Rasterizer::forward(
 		P,
 		geomState.means2D,
 		geomState.depths,
+		geomState.cov2Ds,
 		geomState.point_offsets,
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,
 		geomState.conic_opacity,
-    geomState.tiles_touched,
+		geomState.tiles_touched,
 		tile_grid,
-		tile_size)
+		tile_size);
 	CHECK_CUDA(, debug)
 
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
