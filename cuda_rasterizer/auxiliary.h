@@ -133,13 +133,13 @@ __forceinline__ __device__ bool in_frustum(int idx,
 {
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
 
-	// Bring points to screen space
-	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
-	float p_w = 1.0f / (p_hom.w + 0.0000001f);
-	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
 	p_view = transformPoint4x3(p_orig, viewmatrix);
 
-	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
+	// Bring points to screen space
+	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
+	if (p_hom.w <= 0.0000001f) return false;
+
+	if (p_view.z <= 0.2f)
 	{
 		if (prefiltered)
 		{
@@ -222,8 +222,7 @@ __device__ __forceinline__ void duplicateToTilesTouched(
 	else
 	{
 		// This is the writing pass
-		int2 rect_min, rect_max; // Recompute bounds, should be same as in counting pass
-		// Re-computation logic is exactly the same as above
+		// Re-computation logic is exactly the same as in the counting pass
 		float inv_a = cov.x, inv_b = cov.y, inv_c = cov.z;
 		float det = inv_a * inv_c - inv_b * inv_b;
 		if (det == 0.0f) return;
@@ -266,8 +265,8 @@ __device__ __forceinline__ void duplicateToTilesTouched(
 		else { stretch_factor = 1.0f + beta * fabsf(cos2theta); }
 		float delta_left = (stretch_factor - 1.0f) * l0_left, delta_right = (stretch_factor - 1.0f) * l0_right;
 		left_box_min.x -= delta_left; right_box_max.x += delta_right;
-		rect_min = {(int)fmaxf(0.f, floorf(left_box_min.x / tile_size)), (int)fmaxf(0.f, floorf(fminf(left_box_min.y, right_box_min.y) / tile_size))};
-		rect_max = {(int)fminf((float)grid.x, ceilf(right_box_max.x / tile_size)), (int)fminf((float)grid.y, ceilf(fmaxf(left_box_max.y, right_box_max.y) / tile_size))};
+		int2 rect_min = {(int)fmaxf(0.f, floorf(left_box_min.x / tile_size)), (int)fmaxf(0.f, floorf(fminf(left_box_min.y, right_box_min.y) / tile_size))};
+		int2 rect_max = {(int)fminf((float)grid.x, ceilf(right_box_max.x / tile_size)), (int)fminf((float)grid.y, ceilf(fmaxf(left_box_max.y, right_box_max.y) / tile_size))};
 
 		for (int y = rect_min.y; y < rect_max.y; y++)
 		{
